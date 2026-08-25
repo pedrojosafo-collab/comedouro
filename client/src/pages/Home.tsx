@@ -302,7 +302,7 @@ export default function Home() {
           </div>
           <div className="hero-art">
             <img
-              src="/manus-storage/comedouro-hero_1f609ab0.jpg"
+              src="imagem.png"
               alt="Comedouro automático em uma mesa clara"
             />
             <div className="art-note">
