@@ -35,6 +35,7 @@ import {
   removeSchedule,
   saveSchedule,
   sendFeedCommand,
+  sendRelayTestCommand,
   subscribeToDevice,
   subscribeToHistory,
   subscribeToSchedules,
@@ -117,6 +118,7 @@ export default function Home() {
     foodLevel: null,
     wifi: null,
     servo: null,
+    relay: null,
     lastFeed: null,
     firmware: null,
     raw: {},
@@ -164,7 +166,7 @@ export default function Home() {
     setSaving(true);
     try {
       const commandId = await sendFeedCommand(deviceId, quantity);
-      const result = await waitForCommandResult(deviceId, commandId, 20000);
+      const result = await waitForCommandResult(deviceId, commandId, 70_000);
       if (result === "success")
         toast.success(`${quantity} g executados pelo ESP32`, {
           description: "O dispositivo confirmou a execução do comando.",
@@ -183,6 +185,31 @@ export default function Home() {
       toast.error("Não foi possível enviar o comando", {
         description: "Verifique a conexão e as regras do Realtime Database.",
       });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const testRelay = async () => {
+    if (!online) {
+      toast.error("ESP32 offline", {
+        description: "Conecte o ESP32 ao Wi-Fi antes de testar o relé.",
+      });
+      return;
+    }
+    setSaving(true);
+    try {
+      const commandId = await sendRelayTestCommand(deviceId);
+      const result = await waitForCommandResult(deviceId, commandId, 10_000);
+      if (result === "success") {
+        toast.success("Relé acionado e desligado pelo ESP32");
+      } else if (result === "failed") {
+        toast.error("O teste do relé falhou");
+      } else {
+        toast.warning("Teste enviado, mas sem confirmação do ESP32");
+      }
+    } catch {
+      toast.error("Não foi possível testar o relé");
     } finally {
       setSaving(false);
     }
@@ -402,6 +429,13 @@ export default function Home() {
                     {saving ? "Enviando…" : `Liberar ${quantity} g`}
                     <ChevronRight size={17} />
                   </Button>
+                  <Button
+                    variant="outline"
+                    onClick={testRelay}
+                    disabled={saving}
+                  >
+                    Testar relé
+                  </Button>
                 </div>
                 <p className="form-hint">
                   <Radio size={14} /> O comando será entregue ao ESP32 pelo
@@ -533,8 +567,8 @@ export default function Home() {
                   <strong>{status.firmware || "não informado"}</strong>
                 </div>
                 <div className="connection-line">
-                  <span>Atuador servo</span>
-                  <strong>{status.servo || "não informado"}</strong>
+                  <span>Atuador relé</span>
+                  <strong>{status.relay === true ? "ligado" : "desligado"}</strong>
                 </div>
                 <div className="device-id-field">
                   <label>ID do dispositivo</label>

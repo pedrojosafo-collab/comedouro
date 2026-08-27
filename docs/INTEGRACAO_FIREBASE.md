@@ -1,130 +1,133 @@
-# Integração Comedouro + Firebase + ESP32
+# Integração Comedouro + Firebase + ESP32 + Blynk
 
-## Firmware simplificado
+O firmware `docs/ESP32_Firebase.ino` desta versão usa **Firebase e Blynk ao mesmo tempo**.
 
-O arquivo `docs/ESP32_Firebase.ino` foi atualizado para deixar o ESP32 mais independente e profissional.
+## O que funciona
 
-### O que mudou
+- Wi-Fi configurado pelo WiFiManager.
+- Site envia alimentação pelo Firebase.
+- ESP32 confirma `processing` → `success`/`failed`.
+- Agendamentos são executados pelo ESP32.
+- Histórico e última alimentação são gravados no Firebase.
+- Heartbeat a cada 15 segundos.
+- Blynk funciona em paralelo com o site.
+- Relé no **GPIO 32**.
+- Proteção para o relé ficar desligado quando não existe uma ação ativa.
+- Alimentação não bloqueia o `loop()`, então Firebase e Blynk continuam respondendo durante a alimentação.
+- Botão de alimentação do site e botão de alimentação do Blynk usam o mesmo relé.
+- Botão de teste do relé existe no site e no Blynk e faz somente um pulso de 1 segundo.
 
-- O SSID e a senha do Wi-Fi **não ficam mais gravados no código**.
-- Na primeira inicialização, o ESP32 cria o Wi-Fi `COMEDOURO-ESP32` com senha `12345678`.
-- Ao acessar `192.168.4.1`, é possível selecionar a rede Wi-Fi e informar a senha.
-- As credenciais ficam salvas na memória do ESP32.
-- O dispositivo tenta reconectar automaticamente quando a conexão cai.
-- O ESP32 disponibiliza uma página local com IP, SSID, RSSI, firmware e horário.
-- A página local possui botão para redefinir o Wi-Fi e abrir novamente o portal de configuração.
-- O horário é sincronizado via NTP usando o fuso UTC-3.
-- `lastSeen`, `lastFeed` e registros do histórico usam timestamp real quando o NTP está disponível.
-- Alimentações manuais e agendadas são processadas pelo Firebase.
-- O campo `repetitions` dos comandos/agendamentos também é respeitado.
-- O status é escrito em `devices/{DEVICE_ID}/status`, sem apagar `commands`, `schedules` ou `history`.
+## Arduino IDE
 
-## Estrutura do Firebase
+Instale:
 
-```text
-devices/
-  esp32-001/
-    status/
-      status: online | offline
-      lastSeen: timestamp
-      lastFeed: timestamp
-      foodLevel: opcional
-      wifi: -dBm
-      servo: posição
-      firmware: 2.0.0
-      ip: endereço local
-      ssid: rede conectada
-      deviceId: esp32-001
+- WiFiManager
+- ArduinoJson
+- Blynk
 
-    commands/
-      id-do-comando/
-        type: feed
-        quantity: 50
-        repetitions: 1
-        source: web
-        status: pending | processing | success | failed
-        createdAt: timestamp
-        processedAt: timestamp
+Placa:
 
-    schedules/
-      id-do-agendamento/
-        time: "08:00"
-        quantity: 50
-        repetitions: 1
-        enabled: true
-        createdAt: timestamp
+- ESP32 Dev Module
 
-    history/
-      id-do-evento/
-        quantity: 50
-        type: manual | scheduled
-        status: success | failed
-        timestamp: timestamp
-```
-
-## Instalação na Arduino IDE
-
-Abra `docs/ESP32_Firebase.ino` e instale estas bibliotecas pelo Gerenciador de Bibliotecas:
-
-- **WiFiManager**
-- **ArduinoJson**
-- **ESP32Servo**
-
-Selecione uma placa ESP32 compatível, como `ESP32 Dev Module`, e faça o upload.
-
-### Primeiro acesso ao Wi-Fi
-
-1. Grave o firmware no ESP32.
-2. Abra o Monitor Serial em `115200`.
-3. Se não houver Wi-Fi salvo, procure a rede `COMEDOURO-ESP32`.
-4. Conecte usando a senha `12345678`.
-5. Abra `192.168.4.1`.
-6. Selecione sua rede Wi-Fi e informe a senha.
-7. Salve a configuração.
-8. O ESP32 reiniciará e se conectará automaticamente.
-
-Depois de conectado, o Monitor Serial mostrará o IP local. Acesse esse IP no navegador para abrir o painel local do ESP32.
-
-## Pinos padrão
-
-```text
-Servo -> GPIO 13
-LED   -> GPIO 2
-```
-
-Se o seu circuito usar outros pinos, altere `SERVO_PIN` e `LED_PIN` no firmware.
-
-## Calibração da alimentação
-
-O firmware usa uma estimativa de aproximadamente 10 g por ciclo do mecanismo. O valor real depende do tamanho da saída, do servo, da ração e da mecânica do comedouro.
-
-Os parâmetros principais são:
+No começo de `ESP32_Firebase.ino`, preencha os dados do seu template Blynk:
 
 ```cpp
-#define SERVO_CLOSED 0
-#define SERVO_OPEN 90
-#define SERVO_OPEN_MS 550
-#define SERVO_PAUSE_MS 180
+#define BLYNK_TEMPLATE_ID "SEU_TEMPLATE_ID"
+#define BLYNK_TEMPLATE_NAME "Comedouro ESP32"
+#define BLYNK_AUTH_TOKEN "SEU_TOKEN_BLYNK"
 ```
 
-Faça testes com uma pequena quantidade antes de usar o equipamento em produção. Para medição real em gramas, o projeto precisa de um sensor de peso/célula de carga.
+Não publique o token Blynk no GitHub.
+
+## Blynk
+
+Crie estes Datastreams/Virtual Pins:
+
+| Virtual Pin | Uso | Configuração |
+|---|---|---|
+| V0 | Alimentar | Button / PUSH |
+| V1 | Quantidade | Integer, 10–500 |
+| V2 | Testar relé | Button / PUSH |
+| V3 | ESP32 online | Integer |
+| V4 | Wi-Fi RSSI | Integer |
+| V5 | Última alimentação | Integer |
+
+No Blynk:
+
+1. Coloque um botão em V0 como `PUSH`.
+2. Coloque um campo/slider em V1 de 10 a 500.
+3. Coloque um botão em V2 como `PUSH`.
+4. V3, V4 e V5 podem ser indicadores.
+
+**V0** libera a quantidade definida em V1.
+
+**V2** liga o relé por 1 segundo apenas para teste.
+
+## Relé
+
+O firmware usa:
+
+```text
+ESP32 GPIO 32 -> IN do módulo relé
+ESP32 GND     -> GND do módulo relé
+VCC do relé   -> alimentação compatível com o módulo
+Motor         -> circuito de potência do relé
+```
+
+O motor deve ter sua própria alimentação adequada. Não ligue o motor diretamente ao GPIO do ESP32.
+
+Se o relé funcionar invertido, altere:
+
+```cpp
+#define RELAY_ACTIVE_LOW true
+```
+
+para:
+
+```cpp
+#define RELAY_ACTIVE_LOW false
+```
+
+## Primeiro uso do Wi-Fi
+
+1. Grave o firmware.
+2. Abra o Monitor Serial em 115200.
+3. Conecte na rede `COMEDOURO-ESP32`.
+4. Senha: `12345678`.
+5. Acesse `192.168.4.1`.
+6. Escolha o Wi-Fi do local.
+7. Salve.
+
+Depois disso o ESP32 usa automaticamente a rede salva.
+
+## Calibração da ração
+
+O padrão é:
+
+```cpp
+#define MOTOR_MS_PER_10G 1000
+```
+
+Isso é apenas uma estimativa. Pese a ração liberada e ajuste o tempo conforme seu motor e mecanismo.
+
+Por exemplo, se 1000 ms estiver liberando 15 g, diminua o tempo para aproximar de 10 g.
 
 ## Firebase
 
-O painel usa:
+Banco usado pelo projeto:
 
 `https://comedouro-a8211-default-rtdb.firebaseio.com`
 
-O firmware atualiza apenas os nós necessários. Isso evita o problema de substituir toda a estrutura do dispositivo ao publicar o status.
+O dispositivo é:
 
-Para desenvolvimento, as regras podem permitir o caminho do dispositivo. Em produção, não deixe o banco público: utilize autenticação e regras específicas por usuário/dispositivo.
+`devices/esp32-001`
 
-\n## Comunicação real e heartbeat
+O site e o ESP32 precisam usar o mesmo `DEVICE_ID`.
 
-O painel considera o ESP32 online somente quando `lastSeen` foi atualizado pelo firmware nos últimos 90 segundos. O valor antigo `status: online` no Firebase não mantém o dispositivo online.
+## Importante
 
-Comandos manuais também possuem confirmação: o painel cria o comando, o ESP32 muda para `processing` e depois `success` ou `failed`. O painel aguarda essa confirmação antes de informar que a alimentação foi realmente executada.
+O firmware usa `PATCH` no heartbeat para não apagar `lastFeed` e outros dados do status.
 
-## Observacao
+O site considera o ESP32 online somente quando existe heartbeat recente. Portanto, desligar o ESP32 faz o site passar para offline após o tempo de atualização.
 
-A troca de Wi-Fi pelo painel web foi removida de proposito para manter o projeto simples e mais confiavel. Para trocar a rede, use o portal `COMEDOURO-ESP32` / `192.168.4.1` do WiFiManager.
+Em produção, configure regras de segurança/autenticação no Firebase em vez de deixar o banco público.

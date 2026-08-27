@@ -18,6 +18,7 @@ export type FeederStatus = {
   foodLevel: number | null;
   wifi: number | null;
   servo: string | null;
+  relay: boolean | null;
   lastFeed: number | null;
   firmware: string | null;
   raw: Record<string, unknown>;
@@ -60,6 +61,7 @@ export function subscribeToDevice(deviceId: string, callback: (status: FeederSta
       foodLevel: asNumber(statusRaw.foodLevel ?? raw.foodLevel ?? raw.food ?? raw.level),
       wifi: asNumber(statusRaw.wifi ?? raw.wifi ?? raw.rssi),
       servo: statusRaw.servo ? String(statusRaw.servo) : raw.servo ? String(raw.servo) : null,
+      relay: typeof statusRaw.relay === "boolean" ? statusRaw.relay : typeof raw.relay === "boolean" ? raw.relay : null,
       lastFeed: asNumber(statusRaw.lastFeed ?? raw.lastFeed),
       firmware: statusRaw.firmware ? String(statusRaw.firmware) : raw.firmware ? String(raw.firmware) : null,
       raw,
@@ -102,6 +104,17 @@ export async function sendFeedCommand(deviceId: string, quantity: number, repeti
   return commandRef.key;
 }
 
+export async function sendRelayTestCommand(deviceId: string) {
+  const commandRef = push(ref(database, `devices/${deviceId}/commands`));
+  await set(commandRef, {
+    type: "relay_test",
+    source: "web",
+    status: "pending",
+    createdAt: Date.now(),
+  });
+  return commandRef.key;
+}
+
 export async function saveSchedule(deviceId: string, schedule: Omit<Schedule, "id" | "createdAt">) {
   const scheduleRef = push(ref(database, `devices/${deviceId}/schedules`));
   await set(scheduleRef, { ...schedule, createdAt: Date.now() });
@@ -125,7 +138,7 @@ export function subscribeToCommand(deviceId: string, commandId: string, callback
   });
 }
 
-export function waitForCommandResult(deviceId: string, commandId: string, timeoutMs = 20_000): Promise<"success" | "failed" | "timeout"> {
+export function waitForCommandResult(deviceId: string, commandId: string, timeoutMs = 70_000): Promise<"success" | "failed" | "timeout"> {
   return new Promise((resolve) => {
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;

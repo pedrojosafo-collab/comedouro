@@ -1,34 +1,37 @@
 # Comedouro ESP32 — Relé + Motor
 
-O firmware desta versão foi ajustado para usar um módulo relé no lugar do servo.
+## Ligação
 
-## Ligação do ESP32
-
-- GPIO 13 → entrada de sinal do módulo relé (IN)
+- GPIO 32 → IN do módulo relé
 - GND do ESP32 → GND do módulo relé
-- VCC do módulo relé → alimentação compatível com o módulo
-- Motor → circuito de potência do relé, usando uma fonte adequada ao motor
+- VCC do módulo relé → alimentação compatível
+- Motor → circuito de potência do relé, com fonte adequada
 
-**Não alimente o motor diretamente pelo GPIO do ESP32.** O relé deve apenas comandar o circuito de potência.
-
-## Ajuste da quantidade
-
-No firmware existe:
-
-```cpp
-#define MOTOR_MS_PER_10G 1000
-```
-
-Esse valor é uma calibração inicial. Significa aproximadamente 10 g para cada 1000 ms de motor ligado.
-
-Faça um teste, pese a ração liberada e ajuste esse valor. A quantidade real depende do motor e do mecanismo do comedouro.
+Não alimente o motor pelo GPIO do ESP32.
 
 ## Relé ativo em LOW
 
-O firmware começa com:
+O padrão é:
 
 ```cpp
 #define RELAY_ACTIVE_LOW true
 ```
 
-Isso é comum em módulos relé. Se o seu módulo funcionar ao contrário, altere para `false`.
+Se o módulo funcionar ao contrário, use `false`.
+
+## Calibração
+
+```cpp
+#define MOTOR_MS_PER_10G 1000
+```
+
+É uma estimativa inicial de aproximadamente 10 g por ciclo. Pese a ração e ajuste esse valor.
+
+## Controles
+
+- Site: botão `Liberar X g` → Firebase → ESP32 → relé/motor.
+- Site: `Testar relé` → pulso de 1 segundo.
+- Blynk V0 → alimentação com a quantidade definida em V1.
+- Blynk V2 → pulso de teste de 1 segundo.
+
+O relé é desligado automaticamente ao final da ação e também existe uma proteção no loop para evitar que fique ligado sem uma ação ativa.
