@@ -5,6 +5,12 @@ import * as db from "../db";
 import { getSessionCookieOptions } from "./cookies";
 import { sdk } from "./sdk";
 
+console.log("[ENV CHECK]", {
+  GOOGLE_CLIENT_ID: !!process.env.GOOGLE_CLIENT_ID,
+  GOOGLE_CLIENT_SECRET: !!process.env.GOOGLE_CLIENT_SECRET,
+  GOOGLE_REDIRECT_URI: !!process.env.GOOGLE_REDIRECT_URI,
+  JWT_SECRET: !!process.env.JWT_SECRET,
+});
 const googleClient = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_CLIENT_SECRET,
