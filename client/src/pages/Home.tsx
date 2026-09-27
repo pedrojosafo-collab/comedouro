@@ -1807,14 +1807,14 @@ function AboutPage() {
         <section className="about-hero panel">
           <div className="logo-place">
             <img
-              src="public/marca-if-baiano-campus-senhor-do-bonfim-horizontal-branca.png"
+              src="/marca-if-baiano-campus-senhor-do-bonfim-horizontal-branca.png"
               alt="Logo da instituição"
               className="w-full h-full object-contain"
             />
           </div>
           <div className="logo-place course">
             <img
-              src="public/logo-lica.png"
+              src="/logo-lica.png"
               alt="Logo do curso"
               className="w-full h-full object-contain"
             />
