@@ -1806,48 +1806,67 @@ function AboutPage() {
       <div className="about-grid">
         <section className="about-hero panel">
           <div className="logo-place">
-            <span>
-              LOGO DA
-              <br />
-              INSTITUIÇÃO
-            </span>
+            <img
+              src="public/marca-if-baiano-campus-senhor-do-bonfim-horizontal-branca.png"
+              alt="Logo da instituição"
+              className="w-full h-full object-contain"
+            />
           </div>
           <div className="logo-place course">
-            <span>
-              LOGO DO
-              <br />
-              CURSO
-            </span>
+            <img
+              src="public/logo-lica.png"
+              alt="Logo do curso"
+              className="w-full h-full object-contain"
+            />
           </div>
           <div>
             <span className="section-kicker">SOBRE O COMEDOURO</span>
             <h2>Automação que cuida da rotina.</h2>
             <p>
-              O COMEDOURO foi criado para facilitar a alimentação de animais de
-              estimação por meio de um dispositivo conectado, programação de
-              horários e acompanhamento remoto.
+              O Comedouro é um projeto de automação desenvolvido para facilitar
+              e melhorar o manejo alimentar de animais. O sistema permite
+              programar horários de alimentação e realizar a liberação manual da
+              ração, proporcionando mais praticidade, organização e controle. O
+              projeto integra conhecimentos das Ciências Agrárias e da
+              tecnologia, podendo ser aplicado em propriedades rurais, ambientes
+              acadêmicos e também no uso doméstico.
             </p>
             <p className="muted">
-              Substitua este texto com a apresentação oficial da instituição, do
-              curso e do projeto.
+              O Instituto Federal de Educação, Ciência e Tecnologia Baiano (IF
+              Baiano) – Campus Senhor do Bonfim oferece formação acadêmica e
+              profissional voltada ao desenvolvimento científico, tecnológico e
+              social da região. O curso de Licenciatura em Ciências Agrárias
+              proporciona uma formação interdisciplinar, preparando
+              profissionais para atuar na educação e em diferentes áreas
+              relacionadas às Ciências Agrárias. O projeto Comedouro consiste no
+              desenvolvimento de um sistema automatizado para alimentação de
+              animais, integrando conhecimentos de tecnologia, programação e
+              Ciências Agrárias. A proposta busca contribuir para o manejo
+              alimentar, permitindo o controle e o agendamento da alimentação de
+              forma prática e automatizada, podendo ser aplicada tanto em
+              ambientes acadêmicos e produtivos quanto no uso doméstico.
             </p>
           </div>
         </section>
         <section className="panel editable-info">
           <div>
-            <span className="section-kicker">CAMPOS CONFIGURÁVEIS</span>
-            <h3>Complete a apresentação</h3>
+            <span className="section-kicker"></span>
+            <h3>apresentação</h3>
           </div>
           <div className="about-fields">
             <Detail
               label="Instituição"
-              value="Adicione o nome da instituição"
+              value="   Instituto Federal de Educação, Ciência e Tecnologia Baiano (IF
+              Baiano) – Campus Senhor do Bonfim"
             />
-            <Detail label="Curso" value="Adicione o nome do curso" />
-            <Detail label="Integrantes" value="Adicione os nomes da equipe" />
+            <Detail label="Curso" value="Licenciatura em Ciências Agrárias" />
             <Detail
-              label="Orientador(a)"
-              value="Adicione o nome do orientador"
+              label="Integrantes"
+              value="   Mirella Anjos, Pedro Josafá,"
+            />
+            <Detail
+              label="Orientadores(as)"
+              value="   Claudia Kiya, Jaciara Silva, Juracir Santos,Thales Mendes"
             />
           </div>
         </section>
