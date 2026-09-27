@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1789824976748,
+      "tag": "0000_typical_master_mold",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1789825048518,
+      "tag": "0001_melted_carmella_unuscione",
+      "breakpoints": true
+    }
+  ]
+}
