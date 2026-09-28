@@ -1868,6 +1868,10 @@ function AboutPage() {
               label="Orientadores(as)"
               value="   Claudia Kiya, Jaciara Silva, Juracir Santos,Thales Mendes"
             />
+            <Detail
+              label="Programador(as)"
+              value=" Pedro Josafá - pedrojosafo@gmail.com"
+            />
           </div>
         </section>
       </div>
