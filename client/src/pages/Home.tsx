@@ -1816,7 +1816,7 @@ function AboutPage() {
             <img
               src="/logo-lica.png"
               alt="Logo do curso"
-              className="max-w-[500%] max-h-[70%] object-contain"
+              className="w-[65%] h-[100px] object-contain"
             />
           </div>
           <div>
