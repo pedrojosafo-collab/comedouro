@@ -1869,7 +1869,7 @@ function AboutPage() {
               value="   Claudia Kiya, Jaciara Silva, Juracir Santos,Thales Mendes"
             />
             <Detail
-              label="Programador(as)"
+              label="Programador"
               value=" Pedro Josafá - pedrojosafo@gmail.com"
             />
           </div>
