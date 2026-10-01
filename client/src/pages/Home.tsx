@@ -62,37 +62,47 @@ const esp32Code = `#include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <time.h>
+#include <WiFiManager.h>
 
 // ============================================================
-// CONFIGURAÇÕES
+// CONFIGURAÇÕES DO FIREBASE
 // ============================================================
-
-#define WIFI_SSID "nome"
-#define WIFI_PASSWORD "senha"
 
 // Firebase Realtime Database
-#define FIREBASE_URL    "seu-codigo"
-#define FIREBASE_SECRET "coloque-aqui"
+#define FIREBASE_URL    "COLOQUE_O_SEU"
+#define FIREBASE_SECRET "COLOQUE_SEU_SECRET"
 
-
+// ============================================================
 // ID DO DISPOSITIVO
-// DEVE SER IGUAL AO DEVICE ID CADASTRADO NO SITE
-#define FIREBASE_DEVICE_ID ""
-#define DEVICE_ID       "seu-id"
+// ============================================================
 
-// Pino do relé
+// Deve ser EXATAMENTE o mesmo ID cadastrado no site.
+#define FIREBASE_DEVICE_ID "ID_QUE_MOSTRA_NO_SITE"
+
+// ID usado nos registros
+#define DEVICE_ID  "SEU_ID"
+
+// ============================================================
+// RELÉ
+// ============================================================
+
+// GPIO conectado ao IN do módulo relé
 #define FEED_PIN 32
 
-// Se o seu relé liga com LOW, deixe true.
-// Se liga com HIGH, coloque false.
+// true  = relé ativa com LOW
+// false = relé ativa com HIGH
 #define RELAY_ACTIVE_LOW true
 
-// Tempo que o motor ficará ligado por alimentação
+// Tempo que o motor ficará ligado
 #define FEED_TIME_MS 3000
 
-// Intervalos
+// ============================================================
+// INTERVALOS
+// ============================================================
+
 #define HEARTBEAT_INTERVAL 10000
 #define COMMAND_INTERVAL   2000
+#define SCHEDULE_INTERVAL  10000
 
 // ============================================================
 // VARIÁVEIS
@@ -100,8 +110,10 @@ const esp32Code = `#include <WiFi.h>
 
 unsigned long lastHeartbeat = 0;
 unsigned long lastCommandCheck = 0;
+unsigned long lastScheduleCheck = 0;
 
 String lastCommandId = "";
+String lastScheduleExecution = "";
 
 WiFiClientSecure client;
 
@@ -110,27 +122,42 @@ WiFiClientSecure client;
 // ============================================================
 
 String devicePath() {
-  return String(FIREBASE_URL) + "/devices/" + FIREBASE_DEVICE_ID;
+
+  return String(FIREBASE_URL) +
+         "/devices/" +
+         FIREBASE_DEVICE_ID;
 }
 
 // ============================================================
-// CONTROLE DO RELÉ
+// RELÉ - LIGA
 // ============================================================
 
 void relayOn() {
+
   if (RELAY_ACTIVE_LOW) {
     digitalWrite(FEED_PIN, LOW);
-  } else {
+  } 
+  else {
     digitalWrite(FEED_PIN, HIGH);
   }
+
+  Serial.println("[Relé] LIGADO");
 }
 
+// ============================================================
+// RELÉ - DESLIGA
+// ============================================================
+
 void relayOff() {
+
   if (RELAY_ACTIVE_LOW) {
     digitalWrite(FEED_PIN, HIGH);
-  } else {
+  } 
+  else {
     digitalWrite(FEED_PIN, LOW);
   }
+
+  Serial.println("[Relé] DESLIGADO");
 }
 
 // ============================================================
@@ -141,15 +168,23 @@ bool firebasePut(String path, String json) {
 
   HTTPClient http;
 
-  String url = devicePath() + path + ".json?auth=" + FIREBASE_SECRET;
+  String url =
+    devicePath() +
+    path +
+    ".json?auth=" +
+    FIREBASE_SECRET;
 
   Serial.println();
   Serial.println("[Firebase PUT]");
   Serial.println(url);
   Serial.println(json);
 
- http.begin(client, url);
-  http.addHeader("Content-Type", "application/json");
+  http.begin(client, url);
+
+  http.addHeader(
+    "Content-Type",
+    "application/json"
+  );
 
   int httpCode = http.PUT(json);
 
@@ -159,6 +194,7 @@ bool firebasePut(String path, String json) {
   String response = http.getString();
 
   if (response.length() > 0) {
+
     Serial.print("Resposta: ");
     Serial.println(response);
   }
@@ -176,13 +212,17 @@ String firebaseGet(String path) {
 
   HTTPClient http;
 
-  String url = devicePath() + path + ".json?auth=" + FIREBASE_SECRET;
+  String url =
+    devicePath() +
+    path +
+    ".json?auth=" +
+    FIREBASE_SECRET;
 
   Serial.println();
   Serial.println("[Firebase GET]");
   Serial.println(url);
 
- http.begin(client, url);
+  http.begin(client, url);
 
   int httpCode = http.GET();
 
@@ -192,6 +232,7 @@ String firebaseGet(String path) {
   String response = http.getString();
 
   if (response.length() > 0) {
+
     Serial.print("Resposta: ");
     Serial.println(response);
   }
@@ -213,13 +254,17 @@ bool firebaseDelete(String path) {
 
   HTTPClient http;
 
-  String url = devicePath() + path + ".json?auth=" + FIREBASE_SECRET;
+  String url =
+    devicePath() +
+    path +
+    ".json?auth=" +
+    FIREBASE_SECRET;
 
   Serial.println();
   Serial.println("[Firebase DELETE]");
   Serial.println(url);
 
- http.begin(client, url);
+  http.begin(client, url);
 
   int httpCode = http.sendRequest("DELETE");
 
@@ -229,6 +274,7 @@ bool firebaseDelete(String path) {
   String response = http.getString();
 
   if (response.length() > 0) {
+
     Serial.println(response);
   }
 
@@ -237,48 +283,70 @@ bool firebaseDelete(String path) {
   return httpCode >= 200 && httpCode < 300;
 }
 
-/// ============================================================
+// ============================================================
 // HEARTBEAT
 // ============================================================
 
 void sendHeartbeat() {
 
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[Heartbeat] Wi-Fi desconectado.");
+
+    Serial.println(
+      "[Heartbeat] Wi-Fi desconectado."
+    );
+
     return;
   }
 
   time_t now = time(nullptr);
 
+  long long timestamp =
+    (long long)now * 1000LL;
+
   String json = "{";
+
   json += "\"status\":\"online\",";
-  json += "\"lastSeen\":" + String((long long)now * 1000LL) + ",";
-  json += "\"wifi\":" + String(WiFi.RSSI());
+  json += "\"lastSeen\":" +
+          String(timestamp) +
+          ",";
+  json += "\"wifi\":" +
+          String(WiFi.RSSI());
+
   json += "}";
 
   HTTPClient http;
 
-  // IMPORTANTE:
-  // PATCH altera somente os campos enviados.
-  // PUT substituiria todo /devices/ID.
-  String url = devicePath() + ".json?auth=" + FIREBASE_SECRET;
+  String url =
+    devicePath() +
+    ".json?auth=" +
+    FIREBASE_SECRET;
 
   Serial.println();
-  Serial.println("[Firebase PATCH - Heartbeat]");
+  Serial.println(
+    "[Firebase PATCH - Heartbeat]"
+  );
+
   Serial.println(url);
   Serial.println(json);
 
   http.begin(client, url);
-  http.addHeader("Content-Type", "application/json");
 
-  int httpCode = http.sendRequest("PATCH", json);
+  http.addHeader(
+    "Content-Type",
+    "application/json"
+  );
+
+  int httpCode =
+    http.sendRequest("PATCH", json);
 
   Serial.print("HTTP: ");
   Serial.println(httpCode);
 
-  String response = http.getString();
+  String response =
+    http.getString();
 
   if (response.length() > 0) {
+
     Serial.print("Resposta: ");
     Serial.println(response);
   }
@@ -286,45 +354,143 @@ void sendHeartbeat() {
   http.end();
 
   if (httpCode >= 200 && httpCode < 300) {
-    Serial.println("[Heartbeat] Firebase atualizado sem apagar os dados.");
-  } else {
-    Serial.println("[Heartbeat] ERRO ao atualizar Firebase.");
+
+    Serial.println(
+      "[Heartbeat] Firebase atualizado."
+    );
+
+  } 
+  else {
+
+    Serial.println(
+      "[Heartbeat] ERRO no Firebase."
+    );
   }
 }
+
 // ============================================================
 // REGISTRA ÚLTIMA ALIMENTAÇÃO
 // ============================================================
 
-void registerFeeding(String type, int quantity, String commandId) {
+void registerFeeding(
+  String type,
+  int quantity,
+  String commandId
+) {
 
   time_t now = time(nullptr);
 
-  String json = "{";
-  json += "\"timestamp\":" + String((long long)now * 1000LL) + ",",
-  json += "\"type\":\"" + type + "\",";
-  json += "\"quantity\":" + String(quantity) + ",";
-  json += "\"deviceId\":\"" + String(DEVICE_ID) + "\",";
-  json += "\"commandId\":\"" + commandId + "\"";
-  json += "}";
+  long long timestamp =
+    (long long)now * 1000LL;
 
-  firebasePut("/lastFeeding", json);
+  // ------------------------------------------------------------
+  // ÚLTIMA ALIMENTAÇÃO
+  // ------------------------------------------------------------
 
-  firebasePut("/lastEvent", "\"feeding\"");
+  String lastJson = "{";
 
-  firebasePut("/lastCommandId", "\"" + commandId + "\"");
+  lastJson += "\"createdAt\":" +
+              String(timestamp) +
+              ",";
 
-  Serial.println("[Feeding] Alimentação registrada.");
+  lastJson += "\"timestamp\":" +
+              String(timestamp) +
+              ",";
+
+  lastJson += "\"type\":\"" +
+              type +
+              "\",";
+
+  lastJson += "\"quantity\":" +
+              String(quantity) +
+              ",";
+
+  lastJson += "\"deviceId\":\"" +
+              String(DEVICE_ID) +
+              "\",";
+
+  lastJson += "\"commandId\":\"" +
+              commandId +
+              "\"";
+
+  lastJson += "}";
+
+  firebasePut(
+    "/lastFeeding",
+    lastJson
+  );
+
+  // ------------------------------------------------------------
+  // HISTÓRICO
+  // ------------------------------------------------------------
+
+  // Usa timestamp + millis para evitar colisões de chave.
+  String historyId =
+    String(timestamp) + "_" + String(millis());
+
+  String historyJson = "{";
+
+  historyJson += "\"createdAt\":" +
+                 String(timestamp) +
+                 ",";
+
+  historyJson += "\"timestamp\":" +
+                 String(timestamp) +
+                 ",";
+
+  historyJson += "\"type\":\"" +
+                 type +
+                 "\",";
+
+  historyJson += "\"quantity\":" +
+                 String(quantity) +
+                 ",";
+
+  historyJson += "\"deviceId\":\"" +
+                 String(DEVICE_ID) +
+                 "\",";
+
+  historyJson += "\"commandId\":\"" +
+                 commandId +
+                 "\",";
+
+  historyJson += "\"status\":\"success\"";
+
+  historyJson += "}";
+
+  firebasePut(
+    "/history/" + historyId,
+    historyJson
+  );
+
+  firebasePut(
+    "/lastEvent",
+    "\"feeding\""
+  );
+
+  firebasePut(
+    "/lastCommandId",
+    "\"" + commandId + "\""
+  );
+
+  Serial.println(
+    "[Feeding] Alimentação registrada no histórico."
+  );
 }
 
 // ============================================================
 // EXECUTA ALIMENTAÇÃO
 // ============================================================
 
-void feedFish(String type, int quantity, String commandId) {
+void feedFish(
+  String type,
+  int quantity,
+  String commandId
+) {
 
   Serial.println();
   Serial.println("==============================");
-  Serial.println("     ALIMENTAÇÃO INICIADA");
+  Serial.println("    ALIMENTAÇÃO INICIADA");
   Serial.println("==============================");
 
   Serial.print("Tipo: ");
@@ -336,18 +502,27 @@ void feedFish(String type, int quantity, String commandId) {
   Serial.print("Command ID: ");
   Serial.println(commandId);
 
+  // Liga motor
   relayOn();
 
   delay(FEED_TIME_MS);
 
+  // Desliga motor
   relayOff();
 
-  Serial.println("Motor desligado.");
+  Serial.println(
+    "Motor desligado."
+  );
 
-  registerFeeding(type, quantity, commandId);
+  // Registra no Firebase
+  registerFeeding(
+    type,
+    quantity,
+    commandId
+  );
 
   Serial.println("==============================");
-  Serial.println("     ALIMENTAÇÃO CONCLUÍDA");
+  Serial.println("    ALIMENTAÇÃO CONCLUÍDA");
   Serial.println("==============================");
 }
 
@@ -361,45 +536,69 @@ void checkCommand() {
     return;
   }
 
-  String response = firebaseGet("/command");
+  String response =
+    firebaseGet("/command");
 
-  if (response.length() == 0 || response == "null") {
+  if (
+    response.length() == 0 ||
+    response == "null"
+  ) {
+
     return;
   }
 
   StaticJsonDocument<1024> doc;
 
-  DeserializationError error = deserializeJson(doc, response);
+  DeserializationError error =
+    deserializeJson(
+      doc,
+      response
+    );
 
   if (error) {
 
-    Serial.print("[Command] Erro JSON: ");
-    Serial.println(error.c_str());
+    Serial.print(
+      "[Command] Erro JSON: "
+    );
+
+    Serial.println(
+      error.c_str()
+    );
 
     return;
   }
 
-  bool feed = doc["feed"] | false;
+  bool feed =
+    doc["feed"] | false;
 
   if (!feed) {
     return;
   }
 
-  String commandId = doc["requestId"] | "";
-  String type = doc["type"] | "manual";
-  int quantity = doc["quantity"] | 1;
+  String commandId =
+    doc["requestId"] | "";
+
+  String type =
+    doc["type"] | "manual";
+
+  int quantity =
+    doc["quantity"] | 1;
 
   if (commandId.length() == 0) {
 
-    Serial.println("[Command] Comando sem requestId.");
+    Serial.println(
+      "[Command] Sem requestId."
+    );
 
     return;
   }
 
-  // Evita executar o mesmo comando duas vezes
+  // Evita executar novamente
   if (commandId == lastCommandId) {
 
-    Serial.println("[Command] Comando já executado.");
+    Serial.println(
+      "[Command] Comando já executado."
+    );
 
     firebaseDelete("/command");
 
@@ -407,61 +606,292 @@ void checkCommand() {
   }
 
   Serial.println();
-  Serial.println("[Command] NOVO COMANDO RECEBIDO!");
+  Serial.println(
+    "[Command] NOVO COMANDO RECEBIDO!"
+  );
 
   // Executa alimentação
-  feedFish(type, quantity, commandId);
+  feedFish(
+    type,
+    quantity,
+    commandId
+  );
 
-  // Guarda o último comando executado
+  // Guarda comando
   lastCommandId = commandId;
 
-  // Remove o comando da fila
+  // Remove comando do Firebase
   firebaseDelete("/command");
 
-  Serial.println("[Command] Comando removido do Firebase.");
+  Serial.println(
+    "[Command] Comando removido."
+  );
 }
 
 // ============================================================
-// CONECTA AO WI-FI
+// VERIFICA AGENDAMENTOS
+// ============================================================
+
+String currentDateTimeKey() {
+
+  struct tm timeinfo;
+
+  if (!getLocalTime(&timeinfo, 1000)) {
+    return "";
+  }
+
+  char buffer[32];
+
+  strftime(
+    buffer,
+    sizeof(buffer),
+    "%Y-%m-%d %H:%M",
+    &timeinfo
+  );
+
+  return String(buffer);
+}
+
+
+// ============================================================
+// EXECUTA AGENDAMENTO
+// ============================================================
+
+void checkSchedules() {
+
+  if (WiFi.status() != WL_CONNECTED) {
+    return;
+  }
+
+  String response =
+    firebaseGet("/schedules");
+
+  if (
+    response.length() == 0 ||
+    response == "null"
+  ) {
+    return;
+  }
+
+  StaticJsonDocument<4096> doc;
+
+  DeserializationError error =
+    deserializeJson(
+      doc,
+      response
+    );
+
+  if (error) {
+
+    Serial.print(
+      "[Schedule] Erro JSON: "
+    );
+
+    Serial.println(
+      error.c_str()
+    );
+
+    return;
+  }
+
+  struct tm timeinfo;
+
+  if (!getLocalTime(&timeinfo, 1000)) {
+
+    Serial.println(
+      "[Schedule] Horário ainda não disponível."
+    );
+
+    return;
+  }
+
+  int currentHour =
+    timeinfo.tm_hour;
+
+  int currentMinute =
+    timeinfo.tm_min;
+
+  String today =
+    currentDateTimeKey();
+
+  if (today.length() == 0) {
+    return;
+  }
+
+  Serial.print("[Schedule] Horário atual: ");
+  Serial.println(today);
+
+  for (
+    JsonPair item : doc.as<JsonObject>()
+  ) {
+
+    const char *scheduleId =
+      item.key().c_str();
+
+    JsonObject schedule =
+      item.value().as<JsonObject>();
+
+    bool active =
+      schedule["active"] | false;
+
+    if (!active) {
+      continue;
+    }
+
+    int hour =
+      schedule["hour"] | -1;
+
+    int minute =
+      schedule["minute"] | -1;
+
+    int quantity =
+      schedule["quantity"] | 1;
+
+    if (
+      hour < 0 ||
+      hour > 23 ||
+      minute < 0 ||
+      minute > 59
+    ) {
+      continue;
+    }
+
+    if (
+      hour != currentHour ||
+      minute != currentMinute
+    ) {
+      continue;
+    }
+
+    // Uma execução por agendamento em cada minuto/dia.
+    String executionKey =
+      String(scheduleId) +
+      "|" +
+      today;
+
+    if (
+      executionKey ==
+      lastScheduleExecution
+    ) {
+      continue;
+    }
+
+    lastScheduleExecution =
+      executionKey;
+
+    String commandId =
+      "schedule-" +
+      String(scheduleId) +
+      "-" +
+      String(time(nullptr));
+
+    Serial.println();
+    Serial.println(
+      "=============================="
+    );
+    Serial.println(
+      "[Schedule] AGENDAMENTO ENCONTRADO"
+    );
+    Serial.print("ID: ");
+    Serial.println(scheduleId);
+    Serial.print("Horário: ");
+
+    if (hour < 10) Serial.print("0");
+    Serial.print(hour);
+    Serial.print(":");
+    if (minute < 10) Serial.print("0");
+    Serial.println(minute);
+
+    Serial.print("Quantidade: ");
+    Serial.println(quantity);
+
+    Serial.println(
+      "=============================="
+    );
+
+    feedFish(
+      "automatic",
+      quantity,
+      commandId
+    );
+
+    // Não executa outro agendamento no mesmo ciclo.
+    break;
+  }
+}
+
+
+// ============================================================
+// CONFIGURAÇÃO DO WI-FI PELO CELULAR
 // ============================================================
 
 void connectWiFi() {
 
   Serial.println();
   Serial.println("==============================");
-  Serial.println("       CONECTANDO WI-FI");
+  Serial.println("      CONFIGURAÇÃO WI-FI");
   Serial.println("==============================");
 
   WiFi.mode(WIFI_STA);
 
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  WiFiManager wm;
 
-  int attempts = 0;
+  // Tempo máximo do portal de configuração
+  wm.setConfigPortalTimeout(180);
 
-  while (WiFi.status() != WL_CONNECTED && attempts < 30) {
+  Serial.println(
+    "Tentando conectar ao Wi-Fi salvo..."
+  );
 
-    delay(500);
+  bool conectado =
+    wm.autoConnect("Comedouro-Setup");
 
-    Serial.print(".");
+  if (!conectado) {
 
-    attempts++;
-  }
+    Serial.println();
+    Serial.println(
+      "Não foi possível conectar."
+    );
 
-  Serial.println();
+    Serial.println(
+      "Reiniciando ESP32..."
+    );
 
-  if (WiFi.status() == WL_CONNECTED) {
+    delay(3000);
 
-    Serial.println("Wi-Fi conectado!");
+    ESP.restart();
 
-    Serial.print("IP: ");
-    Serial.println(WiFi.localIP());
+  } 
+  else {
 
-    Serial.print("RSSI: ");
-    Serial.println(WiFi.RSSI());
+    Serial.println();
+    Serial.println(
+      "=============================="
+    );
 
-  } else {
+    Serial.println(
+      "      WI-FI CONECTADO!"
+    );
 
-    Serial.println("ERRO: não foi possível conectar ao Wi-Fi.");
+    Serial.println(
+      "=============================="
+    );
+
+    Serial.print(
+      "IP: "
+    );
+
+    Serial.println(
+      WiFi.localIP()
+    );
+
+    Serial.print(
+      "RSSI: "
+    );
+
+    Serial.println(
+      WiFi.RSSI()
+    );
   }
 }
 
@@ -476,40 +906,109 @@ void setup() {
   delay(1000);
 
   Serial.println();
-  Serial.println("=================================");
-  Serial.println("       COMEDOURO ESP32");
-  Serial.println("=================================");
+  Serial.println(
+    "================================="
+  );
 
-  Serial.print("Device ID: ");
-  Serial.println(DEVICE_ID);
+  Serial.println(
+    "        COMEDOURO ESP32"
+  );
 
-  // Relé inicialmente desligado
-  pinMode(FEED_PIN, OUTPUT);
+  Serial.println(
+    "================================="
+  );
 
+  Serial.print(
+    "Device ID: "
+  );
+
+  Serial.println(
+    DEVICE_ID
+  );
+
+  // ==========================================================
+  // RELÉ
+  // ==========================================================
+
+  pinMode(
+    FEED_PIN,
+    OUTPUT
+  );
+
+  // Garante motor desligado
   relayOff();
 
-  // HTTPS sem validação do certificado
-  // Para teste/local.
+  // ==========================================================
+  // HTTPS
+  // ==========================================================
+
   client.setInsecure();
+
+  // ==========================================================
+  // WI-FI
+  // ==========================================================
 
   connectWiFi();
 
-  configTime(-3 * 3600, 0, "pool.ntp.org", "time.nist.gov");
+  // ==========================================================
+  // HORÁRIO
+  // ==========================================================
 
-Serial.println("Sincronizando horário...");
+  configTime(
+    -3 * 3600,
+    0,
+    "pool.ntp.org",
+    "time.nist.gov"
+  );
 
-time_t now = time(nullptr);
+  Serial.println(
+    "Sincronizando horário..."
+  );
 
-while (now < 100000) {
-  delay(500);
-  Serial.print(".");
-  now = time(nullptr);
-}
+  time_t now =
+    time(nullptr);
 
-Serial.println();
-Serial.println("Horário sincronizado.");
+  int attempts = 0;
 
-  if (WiFi.status() == WL_CONNECTED) {
+  while (
+    now < 100000 &&
+    attempts < 30
+  ) {
+
+    delay(500);
+
+    Serial.print(".");
+
+    now = time(nullptr);
+
+    attempts++;
+  }
+
+  Serial.println();
+
+  if (now >= 100000) {
+
+    Serial.println(
+      "Horário sincronizado."
+    );
+
+  } 
+  else {
+
+    Serial.println(
+      "Não foi possível sincronizar horário."
+    );
+  }
+
+  // ==========================================================
+  // HEARTBEAT INICIAL
+  // ==========================================================
+
+  if (
+    WiFi.status() ==
+    WL_CONNECTED
+  ) {
+
     sendHeartbeat();
   }
 }
@@ -521,13 +1020,19 @@ Serial.println("Horário sincronizado.");
 void loop() {
 
   // ==========================================================
-  // RECONEXÃO WI-FI
+  // VERIFICA WI-FI
   // ==========================================================
 
-  if (WiFi.status() != WL_CONNECTED) {
+  if (
+    WiFi.status() !=
+    WL_CONNECTED
+  ) {
 
-    Serial.println("[Wi-Fi] Conexão perdida.");
+    Serial.println(
+      "[Wi-Fi] Conexão perdida."
+    );
 
+    // Segurança: motor desligado
     relayOff();
 
     connectWiFi();
@@ -537,13 +1042,17 @@ void loop() {
     return;
   }
 
-  unsigned long now = millis();
+  unsigned long now =
+    millis();
 
   // ==========================================================
   // HEARTBEAT
   // ==========================================================
 
-  if (now - lastHeartbeat >= HEARTBEAT_INTERVAL) {
+  if (
+    now - lastHeartbeat >=
+    HEARTBEAT_INTERVAL
+  ) {
 
     lastHeartbeat = now;
 
@@ -551,10 +1060,27 @@ void loop() {
   }
 
   // ==========================================================
-  // COMANDOS
+  // AGENDAMENTOS
   // ==========================================================
 
-  if (now - lastCommandCheck >= COMMAND_INTERVAL) {
+  if (
+    now - lastScheduleCheck >=
+    SCHEDULE_INTERVAL
+  ) {
+
+    lastScheduleCheck = now;
+
+    checkSchedules();
+  }
+
+  // ==========================================================
+  // COMANDOS MANUAIS
+  // ==========================================================
+
+  if (
+    now - lastCommandCheck >=
+    COMMAND_INTERVAL
+  ) {
 
     lastCommandCheck = now;
 
@@ -562,7 +1088,6 @@ void loop() {
   }
 
   delay(50);
-}
 }`;
 
 function formatDate(value?: Date | string | null) {
