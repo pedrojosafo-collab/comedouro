@@ -1331,12 +1331,10 @@ function DevicePage({ data, refetch }: { data: any; refetch: () => void }) {
         return;
       }
 
-      const keyPreview =
-        typeof result.deviceKey === "string" && result.deviceKey.length > 0
-          ? ` Chave: ${result.deviceKey.slice(0, 8)}…`
-          : "";
+      const idPreview =
+        result.id != null ? ` ID do dispositivo: ${result.id}` : "";
 
-      toast.success(`Dispositivo cadastrado.${keyPreview}`);
+      toast.success(`Dispositivo cadastrado.${idPreview}`);
       setId("");
       setName("");
       setShowForm(false);
