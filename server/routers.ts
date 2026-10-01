@@ -19,6 +19,7 @@ const firebaseUrl = (
 
 const firebaseSecret = process.env.FIREBASE_DATABASE_SECRET || "";
 
+// Não registre a URL completa nos logs: ela pode conter a credencial do Firebase.
 function firebaseQuery(): string {
   return firebaseSecret ? `?auth=${encodeURIComponent(firebaseSecret)}` : "";
 }
@@ -31,9 +32,7 @@ async function firebaseWrite(path: string, value: unknown) {
   try {
     const url = `${firebaseUrl}/${path}.json${firebaseQuery()}`;
 
-    console.log("[Firebase PUT]");
-    console.log(url);
-    console.log(JSON.stringify(value));
+    console.log(`[Firebase PUT] Enviando dados para: ${path}`);
 
     const response = await fetch(url, {
       method: "PUT",
@@ -81,9 +80,7 @@ async function firebasePatch(path: string, value: unknown) {
   try {
     const url = `${firebaseUrl}/${path}.json${firebaseQuery()}`;
 
-    console.log("[Firebase PATCH]");
-    console.log(url);
-    console.log(JSON.stringify(value));
+    console.log(`[Firebase PATCH] Atualizando: ${path}`);
 
     const response = await fetch(url, {
       method: "PATCH",
@@ -127,8 +124,7 @@ async function firebaseRead<T>(path: string): Promise<T | undefined> {
   try {
     const url = `${firebaseUrl}/${path}.json${firebaseQuery()}`;
 
-    console.log("[Firebase GET]");
-    console.log(url);
+    console.log(`[Firebase GET] Consultando: ${path}`);
 
     const response = await fetch(url);
 
@@ -384,7 +380,7 @@ export const appRouter = router({
             {
               type?: string;
               quantity?: number;
-              createdAt?: number;
+              createdAt?: number | string;
             }
           >
         >(`${firebasePath}/history`);
@@ -443,7 +439,11 @@ export const appRouter = router({
 
             scheduledTime: null,
 
-            createdAt: new Date(item.createdAt ?? Number(key)),
+            createdAt: new Date(
+              item.createdAt !== undefined
+                ? Number(item.createdAt)
+                : Number(String(key).split("_")[0]),
+            ),
           }));
 
         const feedings = [...localFeedings, ...remoteAutomatic]
