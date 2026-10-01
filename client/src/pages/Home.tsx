@@ -1464,17 +1464,25 @@ function DevicePage({ data, refetch }: { data: any; refetch: () => void }) {
             </div>
             <div className="device-key">
               <span>Chave de instalação</span>
-              <code>{device.deviceKey}</code>
+
+              <code>{device.id}</code>
+
               <button
                 className="icon-button"
                 onClick={() => {
-                  navigator.clipboard?.writeText(device.deviceKey);
+                  navigator.clipboard?.writeText(String(device.id));
                   toast.success("Chave copiada.");
                 }}
               >
                 <Copy size={15} />
               </button>
             </div>
+
+            <p className="helper-text">
+              Coloque este número no ESP32 em <code>FIREBASE_DEVICE_ID</code>.
+              <br />
+              Exemplo: <code>#define FIREBASE_DEVICE_ID "{device.id}"</code>
+            </p>
           </div>
         </section>
       )}
