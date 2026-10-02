@@ -1152,10 +1152,11 @@ void loop() {
   }
 
   delay(50);
-}
-  
-----------------------------------------------------------------`;
-const esp32Code = `//MONITORAMENTO DE AGUA// #include <WiFi.h>
+}`;
+const water_esp32Code = `
+// MONITORAMENTO DE AGUA
+
+#include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
