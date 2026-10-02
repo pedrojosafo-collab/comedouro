@@ -19,7 +19,6 @@ const firebaseUrl = (
 
 const firebaseSecret = process.env.FIREBASE_DATABASE_SECRET || "";
 
-// Não registre a URL completa nos logs: ela pode conter a credencial do Firebase.
 function firebaseQuery(): string {
   return firebaseSecret ? `?auth=${encodeURIComponent(firebaseSecret)}` : "";
 }
@@ -46,8 +45,6 @@ async function firebaseWrite(path: string, value: unknown) {
 
     console.log(`[Firebase PUT] HTTP ${response.status}`);
 
-    console.log("[Firebase PUT] Resposta:", body);
-
     if (!response.ok) {
       console.error(`[Firebase] PUT ${path} -> ${response.status}: ${body}`);
     }
@@ -70,10 +67,6 @@ async function firebaseWrite(path: string, value: unknown) {
 
 /* =========================================================
    FIREBASE PATCH
-
-   IMPORTANTE:
-   PATCH atualiza somente os campos enviados.
-   Não apaga os outros dados do dispositivo.
    ========================================================= */
 
 async function firebasePatch(path: string, value: unknown) {
@@ -93,8 +86,6 @@ async function firebasePatch(path: string, value: unknown) {
     const body = await response.text().catch(() => "");
 
     console.log(`[Firebase PATCH] HTTP ${response.status}`);
-
-    console.log("[Firebase PATCH] Resposta:", body);
 
     if (!response.ok) {
       console.error(`[Firebase] PATCH ${path} -> ${response.status}: ${body}`);
@@ -127,12 +118,9 @@ async function firebaseRead<T>(path: string): Promise<T | undefined> {
     console.log(`[Firebase GET] Consultando: ${path}`);
 
     const response = await fetch(url);
-
     const body = await response.text().catch(() => "");
 
     console.log(`[Firebase GET] HTTP ${response.status}`);
-
-    console.log("[Firebase GET] Resposta:", body);
 
     if (!response.ok) {
       console.error(`[Firebase] GET ${path} -> ${response.status}`);
@@ -178,18 +166,6 @@ async function firebaseDelete(path: string) {
 
 /* =========================================================
    FIREBASE DEVICE PATH
-   =========================================================
-
-   O ID numérico do banco é usado como caminho:
-
-   devices/1
-   devices/2
-   devices/3
-   devices/4
-
-   O deviceId físico do ESP32 é separado:
-
-   comedouro-001
    ========================================================= */
 
 function firebaseDevicePath(deviceId: number): string {
@@ -208,15 +184,14 @@ export const deviceInput = z.object({
     .regex(/^[A-Za-z0-9_-]+$/),
 
   name: z.string().min(2).max(120),
+
+  type: z.enum(["feeder", "water-monitor"]).default("feeder"),
 });
 
 export const scheduleInput = z.object({
   deviceId: z.number(),
-
   hour: z.number().int().min(0).max(23),
-
   minute: z.number().int().min(0).max(59),
-
   quantity: z.number().int().min(1).max(10).default(1),
 });
 
@@ -225,7 +200,11 @@ export const scheduleInput = z.object({
    ========================================================= */
 
 async function requireDevice(
-  user: { id: number; email?: string | null; openId?: string },
+  user: {
+    id: number;
+    email?: string | null;
+    openId?: string;
+  },
   deviceId: number,
 ) {
   const device = await db.getDeviceById(deviceId);
@@ -237,7 +216,6 @@ async function requireDevice(
     });
   }
 
-  // DONO
   if (device.ownerId === user.id) {
     return {
       device,
@@ -245,7 +223,6 @@ async function requireDevice(
     };
   }
 
-  // Tenta obter o e-mail diretamente do usuário salvo
   let userEmail = user.email?.trim().toLowerCase() || "";
 
   if (!userEmail) {
@@ -337,11 +314,17 @@ export const appRouter = router({
 
         console.log("[OVERVIEW] Dispositivos encontrados:", devices);
 
-        const device = devices[0];
-
-        if (!device) {
+        if (!devices || devices.length === 0) {
           return {
             device: null,
+            devices: [],
+            waterDevice: null,
+            waterSensors: {
+              temperature: null,
+              conductivity: null,
+              ph: null,
+              turbidity: null,
+            },
             schedules: [],
             feedings: [],
             collaborators: [],
@@ -349,77 +332,176 @@ export const appRouter = router({
           };
         }
 
-        const firebasePath = firebaseDevicePath(device.id);
+        /* =================================================
+             LER TODOS OS DISPOSITIVOS
+             ================================================= */
 
-        console.log("[OVERVIEW] Firebase path:", firebasePath);
+        const devicesWithFirebase = await Promise.all(
+          devices.map(async (device) => {
+            const firebasePath = firebaseDevicePath(device.id);
 
-        /* ===============================================
-             FIREBASE DEVICE
-             =============================================== */
-
-        const remote = await firebaseRead<{
-          id?: number;
-          deviceId?: string;
-          deviceKey?: string;
-          name?: string;
-          ownerId?: number;
-          ownerUid?: string;
-          status?: string;
-          lastSeen?: number | null;
-          lastFeeding?: number | null;
-          wifi?: number | null;
-        }>(firebasePath);
-
-        /* ===============================================
-             FIREBASE HISTORY
-             =============================================== */
-
-        const remoteHistory = await firebaseRead<
-          Record<
-            string,
-            {
+            const remote = await firebaseRead<{
+              id?: number;
+              deviceId?: string;
+              deviceKey?: string;
+              name?: string;
               type?: string;
-              quantity?: number;
-              createdAt?: number | string;
+              ownerId?: number;
+              ownerUid?: string;
+
+              status?: string;
+              lastSeen?: number | null;
+              lastFeeding?: number | null;
+              wifi?: number | null;
+
+              temperature?: number | null;
+              conductivity?: number | null;
+              ph?: number | null;
+              turbidity?: number | null;
+            }>(firebasePath);
+
+            const lastSeen = remote?.lastSeen
+              ? new Date(remote.lastSeen)
+              : device.lastSeen;
+
+            const online = Boolean(
+              lastSeen && Date.now() - lastSeen.getTime() < 30000,
+            );
+
+            if (lastSeen) {
+              await db.updateDevice(device.id, {
+                lastSeen,
+                wifi: remote?.wifi ?? device.wifi,
+                status: online ? "online" : "offline",
+              });
             }
-          >
-        >(`${firebasePath}/history`);
 
-        /* ===============================================
-             LAST SEEN
-             =============================================== */
-
-        const lastSeen = remote?.lastSeen
-          ? new Date(remote.lastSeen)
-          : device.lastSeen;
-
-        const online = Boolean(
-          lastSeen && Date.now() - lastSeen.getTime() < 30000,
+            return {
+              local: device,
+              remote,
+              lastSeen,
+              online,
+            };
+          }),
         );
 
-        /* ===============================================
-             UPDATE LOCAL DATABASE
-             =============================================== */
+        /* =================================================
+             IDENTIFICAR COMEDOURO
+             ================================================= */
 
-        if (lastSeen) {
-          await db.updateDevice(device.id, {
-            lastSeen,
+        const feeder =
+          devicesWithFirebase.find(
+            (item) =>
+              item.remote?.type === "feeder" ||
+              item.remote?.type === "comedouro" ||
+              item.local.deviceId.includes("comedouro"),
+          ) ?? devicesWithFirebase[0];
 
-            wifi: remote?.wifi ?? device.wifi,
+        /* =================================================
+             IDENTIFICAR MONITOR DE ÁGUA
+             ================================================= */
 
-            status: online ? "online" : "offline",
-          });
+        const waterDevice = devicesWithFirebase.find(
+          (item) =>
+            item.remote?.type === "water-monitor" ||
+            item.local.deviceId.includes("agua") ||
+            item.local.deviceId.includes("water") ||
+            item.local.name.toLowerCase().includes("água") ||
+            item.local.name.toLowerCase().includes("agua"),
+        );
+
+        /* =================================================
+             DADOS DO COMEDOURO
+             ================================================= */
+
+        const device = feeder?.local
+          ? {
+              ...feeder.local,
+
+              lastSeen: feeder.lastSeen,
+
+              wifi: feeder.remote?.wifi ?? feeder.local.wifi,
+
+              status: feeder.online ? "online" : "offline",
+
+              lastFeeding: feeder.remote?.lastFeeding
+                ? new Date(feeder.remote.lastFeeding)
+                : feeder.local.lastFeeding,
+            }
+          : null;
+
+        /* =================================================
+             SENSORES DA ÁGUA
+             ================================================= */
+
+        const waterSensors = waterDevice?.remote
+          ? {
+              temperature: waterDevice.remote.temperature ?? null,
+
+              conductivity: waterDevice.remote.conductivity ?? null,
+
+              ph: waterDevice.remote.ph ?? null,
+
+              turbidity: waterDevice.remote.turbidity ?? null,
+
+              lastSeen: waterDevice.lastSeen,
+
+              status: waterDevice.online ? "online" : "offline",
+
+              wifi: waterDevice.remote.wifi ?? null,
+            }
+          : {
+              temperature: null,
+              conductivity: null,
+              ph: null,
+              turbidity: null,
+              lastSeen: null,
+              status: "offline",
+              wifi: null,
+            };
+
+        /* =================================================
+             FIREBASE HISTORY DO COMEDOURO
+             ================================================= */
+
+        let remoteHistory:
+          | Record<
+              string,
+              {
+                type?: string;
+                quantity?: number;
+                createdAt?: number | string;
+              }
+            >
+          | undefined;
+
+        if (feeder?.local) {
+          remoteHistory = await firebaseRead<
+            Record<
+              string,
+              {
+                type?: string;
+                quantity?: number;
+                createdAt?: number | string;
+              }
+            >
+          >(`${firebaseDevicePath(feeder.local.id)}/history`);
         }
 
-        /* ===============================================
-             LOCAL FEEDINGS
-             =============================================== */
+        /* =================================================
+             ALIMENTAÇÕES LOCAIS
+             ================================================= */
 
-        const localFeedings = await db.getDeviceFeedings(device.id);
+        let localFeedings: Awaited<ReturnType<typeof db.getDeviceFeedings>> =
+          [];
 
-        /* ===============================================
-             FIREBASE FEEDINGS
-             =============================================== */
+        if (feeder?.local) {
+          localFeedings = await db.getDeviceFeedings(feeder.local.id);
+        }
+
+        /* =================================================
+             ALIMENTAÇÕES DO FIREBASE
+             ================================================= */
 
         const remoteAutomatic = Object.entries(remoteHistory ?? {})
           .filter(
@@ -428,7 +510,7 @@ export const appRouter = router({
           .map(([key, item]) => ({
             id: -Number(key.slice(-8)) || 0,
 
-            deviceId: device.id,
+            deviceId: feeder!.local.id,
 
             type:
               item.type === "manual"
@@ -450,41 +532,61 @@ export const appRouter = router({
           .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
           .slice(0, 100);
 
-        /* ===============================================
-             SCHEDULES
-             =============================================== */
+        /* =================================================
+             AGENDAMENTOS
+             ================================================= */
 
-        const schedules = await db.getDeviceSchedules(device.id);
+        let schedules: Awaited<ReturnType<typeof db.getDeviceSchedules>> = [];
 
-        /* ===============================================
-             COLLABORATORS
-             =============================================== */
+        if (feeder?.local) {
+          schedules = await db.getDeviceSchedules(feeder.local.id);
+        }
 
-        const collaborators = await db.getDeviceCollaborators(device.id);
+        /* =================================================
+             COLABORADORES
+             ================================================= */
 
-        /* ===============================================
-             RETURN
-             =============================================== */
+        let collaborators: Awaited<
+          ReturnType<typeof db.getDeviceCollaborators>
+        > = [];
+
+        if (feeder?.local) {
+          collaborators = await db.getDeviceCollaborators(feeder.local.id);
+        }
+
+        /* =================================================
+             RETORNO
+             ================================================= */
 
         return {
-          device: {
-            ...device,
+          device,
 
-            lastSeen,
+          devices: devicesWithFirebase.map((item) => ({
+            ...item.local,
 
-            wifi: remote?.wifi ?? device.wifi,
+            status: item.online ? "online" : "offline",
 
-            status: online ? "online" : "offline",
+            lastSeen: item.lastSeen,
 
-            lastFeeding: remote?.lastFeeding
-              ? new Date(remote.lastFeeding)
-              : device.lastFeeding,
-          },
+            type: item.remote?.type ?? "feeder",
+          })),
+
+          waterDevice: waterDevice?.local
+            ? {
+                ...waterDevice.local,
+
+                status: waterDevice.online ? "online" : "offline",
+
+                lastSeen: waterDevice.lastSeen,
+
+                type: waterDevice.remote?.type ?? "water-monitor",
+              }
+            : null,
+
+          waterSensors,
 
           schedules,
-
           feedings,
-
           collaborators,
 
           firebaseConfigured: Boolean(firebaseUrl),
@@ -494,7 +596,7 @@ export const appRouter = router({
 
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
-          message: "Erro ao carregar os dados do dispositivo.",
+          message: "Erro ao carregar os dados dos dispositivos.",
           cause: error,
         });
       }
@@ -540,21 +642,23 @@ export const appRouter = router({
         if (!device || !device.id) {
           throw new TRPCError({
             code: "INTERNAL_SERVER_ERROR",
+
             message: "Não foi possível criar o dispositivo no banco de dados.",
           });
         }
 
         const firebasePath = firebaseDevicePath(device.id);
 
-        console.log("[DEVICE] Firebase path:", firebasePath);
-
         const firebaseDevice = {
           id: device.id,
+
           deviceId: device.deviceId,
 
           deviceKey: device.deviceKey,
 
           name: device.name,
+
+          type: input.type,
 
           ownerId: device.ownerId,
 
@@ -573,6 +677,14 @@ export const appRouter = router({
           history: null,
 
           schedules: null,
+
+          temperature: input.type === "water-monitor" ? null : undefined,
+
+          conductivity: input.type === "water-monitor" ? null : undefined,
+
+          ph: input.type === "water-monitor" ? null : undefined,
+
+          turbidity: input.type === "water-monitor" ? null : undefined,
         };
 
         const sync = await firebaseWrite(firebasePath, firebaseDevice);
@@ -585,6 +697,8 @@ export const appRouter = router({
           deviceId: device.deviceId,
 
           name: device.name,
+
+          type: input.type,
 
           deviceKey: device.deviceKey,
 
@@ -600,7 +714,6 @@ export const appRouter = router({
       .input(
         z.object({
           deviceId: z.number(),
-
           name: z.string().min(2).max(120),
         }),
       )
@@ -617,7 +730,7 @@ export const appRouter = router({
           name: input.name,
         });
 
-        await firebasePatch(`${firebaseDevicePath(access.device.id)}`, {
+        await firebasePatch(firebaseDevicePath(access.device.id), {
           name: input.name,
         });
 
@@ -669,6 +782,7 @@ export const appRouter = router({
         if (!sync.synced) {
           throw new TRPCError({
             code: "INTERNAL_SERVER_ERROR",
+
             message: "Não foi possível enviar o comando para o Firebase.",
           });
         }

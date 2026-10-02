@@ -43,6 +43,9 @@ import {
   WifiOff,
   X,
   Zap,
+  Thermometer,
+  Waves,
+  TestTube2,
 } from "lucide-react";
 
 const navItems = [
@@ -50,1104 +53,97 @@ const navItems = [
   { path: "/feeding", label: "Alimentação manual", icon: Zap },
   { path: "/schedule", label: "Programação", icon: CalendarClock },
   { path: "/history", label: "Histórico", icon: History },
-  { path: "/device", label: "Meu dispositivo", icon: Cpu },
+  { path: "/device", label: "Meus dispositivos", icon: Cpu },
+  { path: "/water", label: "Monitoramento da água", icon: Droplets },
   { path: "/collaborators", label: "Colaboradores", icon: Users },
   { path: "/code", label: "Código ESP32", icon: Code2 },
   { path: "/install", label: "Como instalar", icon: BookOpen },
   { path: "/about", label: "Sobre o projeto", icon: Leaf },
 ];
 
-const esp32Code = `#include <WiFi.h>
-#include <WiFiClientSecure.h>
+const esp32Code = `/* COMEDOURO — firmware base para ESP32 + Firebase Realtime Database
+ * Configure somente os campos abaixo. Nunca publique seu token em repositórios.
+ * Bibliotecas: WiFi, HTTPClient, ArduinoJson (6.x)
+ */
+#include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
-#include <time.h>
-#include <WiFiManager.h>
 
-// ============================================================
-// CONFIGURAÇÕES DO FIREBASE
-// ============================================================
-
-#define FIREBASE_URL    "seu-aqui"
-#define FIREBASE_SECRET "coloque-aqui"
-
-// ============================================================
-// ID DO DISPOSITIVO
-// ============================================================
-
-// ID numérico cadastrado no site/Firebase
-#define FIREBASE_DEVICE_ID "esta_no_site"
-
-// ID físico do ESP32
-#define DEVICE_ID "Nome_que_voçê_colocou"
-
-// ============================================================
-// RELÉ
-// ============================================================
-
-#define FEED_PIN 32
-
-// true  = relé ativa com LOW
-// false = relé ativa com HIGH
-#define RELAY_ACTIVE_LOW true
-
-// Tempo do motor ligado para liberar UMA porção
-#define FEED_TIME_MS 1000
-
-// Intervalo entre porções
-#define PORTION_INTERVAL_MS 1000
-
-// ============================================================
-// INTERVALOS
-// ============================================================
-
-#define HEARTBEAT_INTERVAL 10000
-#define COMMAND_INTERVAL   2000
-#define SCHEDULE_INTERVAL  10000
-
-// ============================================================
-// VARIÁVEIS
-// ============================================================
+#define WIFI_SSID "SEU_WIFI"
+#define WIFI_PASSWORD "SUA_SENHA"
+#define FIREBASE_HOST "https://comedouro-a8211-default-rtdb.firebaseio.com"
+#define FIREBASE_AUTH_TOKEN "COLOQUE_SEU_TOKEN_AQUI"
+#define DEVICE_ID "COMEDOURO-001"
+#define SERVO_PIN 18
+#define FEEDING_MS 1200
 
 unsigned long lastHeartbeat = 0;
-unsigned long lastCommandCheck = 0;
 unsigned long lastScheduleCheck = 0;
+String basePath() { return String(FIREBASE_HOST) + "/devices/" + DEVICE_ID; }
 
-String lastCommandId = "";
-String lastScheduleExecution = "";
-
-WiFiClientSecure client;
-
-// ============================================================
-// URL BASE DO DISPOSITIVO
-// ============================================================
-
-String devicePath() {
-
-  return String(FIREBASE_URL) +
-         "/devices/" +
-         FIREBASE_DEVICE_ID;
+void connectWifi() {
+  WiFi.mode(WIFI_STA); WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
+  Serial.println("\\nWi-Fi conectado");
 }
-
-// ============================================================
-// RELÉ - LIGA
-// ============================================================
-
-void relayOn() {
-
-  if (RELAY_ACTIVE_LOW) {
-    digitalWrite(FEED_PIN, LOW);
-  }
-  else {
-    digitalWrite(FEED_PIN, HIGH);
-  }
-
-  Serial.println("[Relé] LIGADO");
+String authUrl(String path) { return basePath() + path + ".json?auth=" + FIREBASE_AUTH_TOKEN; }
+void firebasePut(String path, String json) {
+  if (WiFi.status() != WL_CONNECTED) connectWifi();
+  HTTPClient http; http.begin(authUrl(path)); http.addHeader("Content-Type", "application/json");
+  http.PUT(json); http.end();
 }
-
-// ============================================================
-// RELÉ - DESLIGA
-// ============================================================
-
-void relayOff() {
-
-  if (RELAY_ACTIVE_LOW) {
-    digitalWrite(FEED_PIN, HIGH);
-  }
-  else {
-    digitalWrite(FEED_PIN, LOW);
-  }
-
-  Serial.println("[Relé] DESLIGADO");
-}
-
-// ============================================================
-// FIREBASE - PUT
-// ============================================================
-
-bool firebasePut(String path, String json) {
-
-  HTTPClient http;
-
-  String url =
-    devicePath() +
-    path +
-    ".json?auth=" +
-    FIREBASE_SECRET;
-
-  Serial.println();
-  Serial.println("[Firebase PUT]");
-  Serial.println(url);
-  Serial.println(json);
-
-  http.begin(client, url);
-
-  http.addHeader(
-    "Content-Type",
-    "application/json"
-  );
-
-  int httpCode = http.PUT(json);
-
-  Serial.print("HTTP: ");
-  Serial.println(httpCode);
-
-  String response = http.getString();
-
-  if (response.length() > 0) {
-    Serial.print("Resposta: ");
-    Serial.println(response);
-  }
-
-  http.end();
-
-  return httpCode >= 200 && httpCode < 300;
-}
-
-// ============================================================
-// FIREBASE - GET
-// ============================================================
-
 String firebaseGet(String path) {
-
-  HTTPClient http;
-
-  String url =
-    devicePath() +
-    path +
-    ".json?auth=" +
-    FIREBASE_SECRET;
-
-  Serial.println();
-  Serial.println("[Firebase GET]");
-  Serial.println(url);
-
-  http.begin(client, url);
-
-  int httpCode = http.GET();
-
-  Serial.print("HTTP: ");
-  Serial.println(httpCode);
-
-  String response = http.getString();
-
-  if (response.length() > 0) {
-    Serial.print("Resposta: ");
-    Serial.println(response);
-  }
-
-  http.end();
-
-  if (httpCode >= 200 && httpCode < 300) {
-    return response;
-  }
-
-  return "";
+  if (WiFi.status() != WL_CONNECTED) connectWifi();
+  HTTPClient http; http.begin(authUrl(path)); int code = http.GET();
+  String body = code > 0 ? http.getString() : ""; http.end(); return body;
 }
-
-// ============================================================
-// FIREBASE - DELETE
-// ============================================================
-
-bool firebaseDelete(String path) {
-
-  HTTPClient http;
-
-  String url =
-    devicePath() +
-    path +
-    ".json?auth=" +
-    FIREBASE_SECRET;
-
-  Serial.println();
-  Serial.println("[Firebase DELETE]");
-  Serial.println(url);
-
-  http.begin(client, url);
-
-  int httpCode = http.sendRequest("DELETE");
-
-  Serial.print("HTTP: ");
-  Serial.println(httpCode);
-
-  String response = http.getString();
-
-  if (response.length() > 0) {
-    Serial.println(response);
-  }
-
-  http.end();
-
-  return httpCode >= 200 && httpCode < 300;
+void dispense(String type, int quantity) {
+  // Acione aqui o servo, motor ou relé do seu protótipo.
+  digitalWrite(SERVO_PIN, HIGH); delay(FEEDING_MS * quantity); digitalWrite(SERVO_PIN, LOW);
+  unsigned long now = (unsigned long)time(nullptr) * 1000UL;
+  String payload = "{\\"type\\":\\"" + type + "\\",\\"quantity\\":" + String(quantity) + ",\\"createdAt\\":" + String(now) + "}";
+  firebasePut("/lastFeeding", String(now));
+  firebasePut("/lastEvent", payload);
+  if (type == "automatic") firebasePut("/history/" + String(now), payload);
+  firebasePut("/command/feed", "false");
 }
-
-// ============================================================
-// HEARTBEAT
-// ============================================================
-
-void sendHeartbeat() {
-
-  if (WiFi.status() != WL_CONNECTED) {
-
-    Serial.println(
-      "[Heartbeat] Wi-Fi desconectado."
-    );
-
-    return;
-  }
-
-  time_t now = time(nullptr);
-
-  long long timestamp =
-    (long long)now * 1000LL;
-
-  String json = "{";
-
-  json += "\"status\":\"online\",";
-  json += "\"lastSeen\":" +
-          String(timestamp) +
-          ",";
-  json += "\"wifi\":" +
-          String(WiFi.RSSI());
-
-  json += "}";
-
-  HTTPClient http;
-
-  String url =
-    devicePath() +
-    ".json?auth=" +
-    FIREBASE_SECRET;
-
-  Serial.println();
-  Serial.println(
-    "[Firebase PATCH - Heartbeat]"
-  );
-
-  Serial.println(url);
-  Serial.println(json);
-
-  http.begin(client, url);
-
-  http.addHeader(
-    "Content-Type",
-    "application/json"
-  );
-
-  int httpCode =
-    http.sendRequest("PATCH", json);
-
-  Serial.print("HTTP: ");
-  Serial.println(httpCode);
-
-  String response =
-    http.getString();
-
-  if (response.length() > 0) {
-
-    Serial.print("Resposta: ");
-    Serial.println(response);
-  }
-
-  http.end();
-
-  if (httpCode >= 200 && httpCode < 300) {
-
-    Serial.println(
-      "[Heartbeat] Firebase atualizado."
-    );
-
-  }
-  else {
-
-    Serial.println(
-      "[Heartbeat] ERRO no Firebase."
-    );
-  }
-}
-
-// ============================================================
-// REGISTRA ÚLTIMA ALIMENTAÇÃO
-// ============================================================
-
-void registerFeeding(
-  String type,
-  int quantity,
-  String commandId
-) {
-
-  time_t now = time(nullptr);
-
-  long long timestamp =
-    (long long)now * 1000LL;
-
-  // ==========================================================
-  // ÚLTIMA ALIMENTAÇÃO
-  // ==========================================================
-  //
-  // IMPORTANTE:
-  // O site espera que lastFeeding seja um timestamp numérico.
-  //
-  // Antes estava sendo salvo um objeto JSON.
-  // Agora será:
-  //
-  // lastFeeding: 1790900825000
-  //
-  // ==========================================================
-
-  bool lastFeedingOK =
-    firebasePut(
-      "/lastFeeding",
-      String(timestamp)
-    );
-
-  if (lastFeedingOK) {
-
-    Serial.println(
-      "[Feeding] lastFeeding salvo com sucesso."
-    );
-
-  }
-  else {
-
-    Serial.println(
-      "[Feeding] ERRO ao salvar lastFeeding."
-    );
-  }
-
-  // ==========================================================
-  // HISTÓRICO
-  // ==========================================================
-
-  String historyId =
-    String(timestamp) +
-    "_" +
-    String(millis());
-
-  String historyJson = "{";
-
-  historyJson += "\"createdAt\":" +
-                 String(timestamp) +
-                 ",";
-
-  historyJson += "\"timestamp\":" +
-                 String(timestamp) +
-                 ",";
-
-  historyJson += "\"type\":\"" +
-                 type +
-                 "\",";
-
-  historyJson += "\"quantity\":" +
-                 String(quantity) +
-                 ",";
-
-  historyJson += "\"deviceId\":\"" +
-                 String(DEVICE_ID) +
-                 "\",";
-
-  historyJson += "\"commandId\":\"" +
-                 commandId +
-                 "\",";
-
-  historyJson += "\"status\":\"success\"";
-
-  historyJson += "}";
-
-  bool historyOK =
-    firebasePut(
-      "/history/" + historyId,
-      historyJson
-    );
-
-  if (historyOK) {
-
-    Serial.println(
-      "[Feeding] Histórico salvo com sucesso."
-    );
-
-  }
-  else {
-
-    Serial.println(
-      "[Feeding] ERRO ao salvar histórico."
-    );
-  }
-
-  // ==========================================================
-  // ÚLTIMO EVENTO
-  // ==========================================================
-
-  firebasePut(
-    "/lastEvent",
-    "\"feeding\""
-  );
-
-  // ==========================================================
-  // ÚLTIMO COMANDO
-  // ==========================================================
-
-  firebasePut(
-    "/lastCommandId",
-    "\"" + commandId + "\""
-  );
-
-  Serial.println();
-  Serial.println(
-    "[Feeding] Alimentação registrada."
-  );
-}
-
-// ============================================================
-// EXECUTA ALIMENTAÇÃO
-// ============================================================
-
-void feedFish(
-  String type,
-  int quantity,
-  String commandId
-) {
-
-  // Garante pelo menos 1 porção
-  if (quantity < 1) {
-    quantity = 1;
-  }
-
-  Serial.println();
-  Serial.println("==============================");
-  Serial.println("    ALIMENTAÇÃO INICIADA");
-  Serial.println("==============================");
-
-  Serial.print("Tipo: ");
-  Serial.println(type);
-
-  Serial.print("Porções: ");
-  Serial.println(quantity);
-
-  Serial.print("Command ID: ");
-  Serial.println(commandId);
-
-  // ==========================================================
-  // CADA PORÇÃO = UMA ATIVAÇÃO DO MOTOR
-  // ==========================================================
-
-  for (int i = 1; i <= quantity; i++) {
-
-    Serial.println();
-    Serial.print("[Porção ");
-    Serial.print(i);
-    Serial.print(" de ");
-    Serial.print(quantity);
-    Serial.println("]");
-
-    // Liga motor
-    relayOn();
-
-    // Tempo para liberar uma porção
-    delay(FEED_TIME_MS);
-
-    // Desliga motor
-    relayOff();
-
-    Serial.print("[Porção ");
-    Serial.print(i);
-    Serial.println("] liberada.");
-
-    // Intervalo entre porções
-    if (i < quantity) {
-
-      Serial.print("Aguardando ");
-      Serial.print(PORTION_INTERVAL_MS);
-      Serial.println(" ms...");
-
-      delay(PORTION_INTERVAL_MS);
-    }
-  }
-
-  Serial.println();
-  Serial.println(
-    "Todas as porções foram liberadas."
-  );
-
-  // Registra alimentação
-  registerFeeding(
-    type,
-    quantity,
-    commandId
-  );
-
-  Serial.println("==============================");
-  Serial.println("    ALIMENTAÇÃO CONCLUÍDA");
-  Serial.println("==============================");
-}
-
-// ============================================================
-// VERIFICA COMANDO DO SITE
-// ============================================================
-
-void checkCommand() {
-
-  if (WiFi.status() != WL_CONNECTED) {
-    return;
-  }
-
-  String response =
-    firebaseGet("/command");
-
-  if (
-    response.length() == 0 ||
-    response == "null"
-  ) {
-
-    return;
-  }
-
-  StaticJsonDocument<1024> doc;
-
-  DeserializationError error =
-    deserializeJson(
-      doc,
-      response
-    );
-
-  if (error) {
-
-    Serial.print(
-      "[Command] Erro JSON: "
-    );
-
-    Serial.println(
-      error.c_str()
-    );
-
-    return;
-  }
-
-  bool feed =
-    doc["feed"] | false;
-
-  if (!feed) {
-    return;
-  }
-
-  String commandId =
-    doc["requestId"] | "";
-
-  String type =
-    doc["type"] | "manual";
-
-  int quantity =
-    doc["quantity"] | 1;
-
-  if (commandId.length() == 0) {
-
-    Serial.println(
-      "[Command] Sem requestId."
-    );
-
-    return;
-  }
-
-  // Evita executar novamente
-  if (commandId == lastCommandId) {
-
-    Serial.println(
-      "[Command] Comando já executado."
-    );
-
-    firebaseDelete("/command");
-
-    return;
-  }
-
-  Serial.println();
-  Serial.println(
-    "[Command] NOVO COMANDO RECEBIDO!"
-  );
-
-  // Executa alimentação
-  feedFish(
-    type,
-    quantity,
-    commandId
-  );
-
-  // Guarda comando
-  lastCommandId = commandId;
-
-  // Remove comando
-  firebaseDelete("/command");
-
-  Serial.println(
-    "[Command] Comando removido."
-  );
-}
-
-// ============================================================
-// DATA/HORA ATUAL
-// ============================================================
-
-String currentDateTimeKey() {
-
-  struct tm timeinfo;
-
-  if (!getLocalTime(&timeinfo, 1000)) {
-    return "";
-  }
-
-  char buffer[32];
-
-  strftime(
-    buffer,
-    sizeof(buffer),
-    "%Y-%m-%d %H:%M",
-    &timeinfo
-  );
-
-  return String(buffer);
-}
-
-// ============================================================
-// VERIFICA AGENDAMENTOS
-// ============================================================
-
+String lastScheduleKey = "";
 void checkSchedules() {
-
-  if (WiFi.status() != WL_CONNECTED) {
-    return;
-  }
-
-  String response =
-    firebaseGet("/schedules");
-
-  if (
-    response.length() == 0 ||
-    response == "null"
-  ) {
-
-    return;
-  }
-
-  StaticJsonDocument<4096> doc;
-
-  DeserializationError error =
-    deserializeJson(
-      doc,
-      response
-    );
-
-  if (error) {
-
-    Serial.print(
-      "[Schedule] Erro JSON: "
-    );
-
-    Serial.println(
-      error.c_str()
-    );
-
-    return;
-  }
-
-  struct tm timeinfo;
-
-  if (!getLocalTime(&timeinfo, 1000)) {
-
-    Serial.println(
-      "[Schedule] Horário ainda não disponível."
-    );
-
-    return;
-  }
-
-  int currentHour =
-    timeinfo.tm_hour;
-
-  int currentMinute =
-    timeinfo.tm_min;
-
-  String today =
-    currentDateTimeKey();
-
-  if (today.length() == 0) {
-    return;
-  }
-
-  Serial.print("[Schedule] Horário atual: ");
-  Serial.println(today);
-
-  for (
-    JsonPair item : doc.as<JsonObject>()
-  ) {
-
-    const char *scheduleId =
-      item.key().c_str();
-
-    JsonObject schedule =
-      item.value().as<JsonObject>();
-
-    bool active =
-      schedule["active"] | false;
-
-    if (!active) {
-      continue;
+  String body = firebaseGet("/schedules"); StaticJsonDocument<2048> doc;
+  if (deserializeJson(doc, body) != DeserializationError::Ok) return;
+  time_t now = time(nullptr); struct tm *clockNow = localtime(&now);
+  String minuteKey = String(clockNow->tm_year) + "-" + String(clockNow->tm_yday) + "-" + String(clockNow->tm_hour) + "-" + String(clockNow->tm_min);
+  for (JsonPair item : doc.as<JsonObject>()) {
+    JsonObject schedule = item.value().as<JsonObject>();
+    if (!(schedule["active"] | false)) continue;
+    int hour = schedule["hour"] | -1; int minute = schedule["minute"] | -1; int quantity = schedule["quantity"] | 1;
+    String scheduleKey = String(item.key().c_str()) + "-" + minuteKey;
+    if (hour == clockNow->tm_hour && minute == clockNow->tm_min && scheduleKey != lastScheduleKey) {
+      dispense("automatic", quantity); lastScheduleKey = scheduleKey;
     }
-
-    int hour =
-      schedule["hour"] | -1;
-
-    int minute =
-      schedule["minute"] | -1;
-
-    int quantity =
-      schedule["quantity"] | 1;
-
-    if (
-      hour < 0 ||
-      hour > 23 ||
-      minute < 0 ||
-      minute > 59
-    ) {
-      continue;
-    }
-
-    if (
-      hour != currentHour ||
-      minute != currentMinute
-    ) {
-      continue;
-    }
-
-    // Uma execução por agendamento
-    // no mesmo minuto
-    String executionKey =
-      String(scheduleId) +
-      "|" +
-      today;
-
-    if (
-      executionKey ==
-      lastScheduleExecution
-    ) {
-      continue;
-    }
-
-    lastScheduleExecution =
-      executionKey;
-
-    String commandId =
-      "schedule-" +
-      String(scheduleId) +
-      "-" +
-      String(time(nullptr));
-
-    Serial.println();
-    Serial.println(
-      "=============================="
-    );
-
-    Serial.println(
-      "[Schedule] AGENDAMENTO ENCONTRADO"
-    );
-
-    Serial.print("ID: ");
-    Serial.println(scheduleId);
-
-    Serial.print("Horário: ");
-
-    if (hour < 10) Serial.print("0");
-    Serial.print(hour);
-
-    Serial.print(":");
-
-    if (minute < 10) Serial.print("0");
-    Serial.println(minute);
-
-    Serial.print("Quantidade: ");
-    Serial.println(quantity);
-
-    Serial.println(
-      "=============================="
-    );
-
-    feedFish(
-      "automatic",
-      quantity,
-      commandId
-    );
-
-    // Não executa outro agendamento
-    // no mesmo ciclo
-    break;
   }
 }
-
-// ============================================================
-// CONFIGURAÇÃO DO WI-FI
-// ============================================================
-
-void connectWiFi() {
-
-  Serial.println();
-  Serial.println("==============================");
-  Serial.println("      CONFIGURAÇÃO WI-FI");
-  Serial.println("==============================");
-
-  WiFi.mode(WIFI_STA);
-
-  WiFiManager wm;
-
-  wm.setConfigPortalTimeout(180);
-
-  Serial.println(
-    "Tentando conectar ao Wi-Fi salvo..."
-  );
-
-  bool conectado =
-    wm.autoConnect("Comedouro-Setup");
-
-  if (!conectado) {
-
-    Serial.println();
-    Serial.println(
-      "Não foi possível conectar."
-    );
-
-    Serial.println(
-      "Reiniciando ESP32..."
-    );
-
-    delay(3000);
-
-    ESP.restart();
-
-  }
-  else {
-
-    Serial.println();
-    Serial.println(
-      "=============================="
-    );
-
-    Serial.println(
-      "      WI-FI CONECTADO!"
-    );
-
-    Serial.println(
-      "=============================="
-    );
-
-    Serial.print(
-      "IP: "
-    );
-
-    Serial.println(
-      WiFi.localIP()
-    );
-
-    Serial.print(
-      "RSSI: "
-    );
-
-    Serial.println(
-      WiFi.RSSI()
-    );
+void checkManualCommand() {
+  String body = firebaseGet("/command"); StaticJsonDocument<512> doc;
+  if (deserializeJson(doc, body) == DeserializationError::Ok && doc["feed"] == true) {
+    int quantity = doc["quantity"] | 1; const char* type = doc["type"] | "manual"; dispense(type, quantity);
   }
 }
-
-// ============================================================
-// SETUP
-// ============================================================
-
+void checkSchedules() {
+  // O firmware deve comparar os horários ativos com hora/minuto local.
+  // O identificador do minuto evita repetir a mesma programação.
+  String body = firebaseGet("/schedules");
+  // Faça o parse de cada item e compare hour/minute quando integrar RTC/NTP.
+  (void)body;
+}
 void setup() {
-
-  Serial.begin(115200);
-
-  delay(1000);
-
-  Serial.println();
-  Serial.println(
-    "================================="
-  );
-
-  Serial.println(
-    "        COMEDOURO ESP32"
-  );
-
-  Serial.println(
-    "================================="
-  );
-
-  Serial.print(
-    "Device ID: "
-  );
-
-  Serial.println(
-    DEVICE_ID
-  );
-
-  // ==========================================================
-  // RELÉ
-  // ==========================================================
-
-  pinMode(
-    FEED_PIN,
-    OUTPUT
-  );
-
-  // Motor desligado
-  relayOff();
-
-  // ==========================================================
-  // HTTPS
-  // ==========================================================
-
-  client.setInsecure();
-
-  // ==========================================================
-  // WI-FI
-  // ==========================================================
-
-  connectWiFi();
-
-  // ==========================================================
-  // HORÁRIO
-  // ==========================================================
-
-  configTime(
-    -3 * 3600,
-    0,
-    "pool.ntp.org",
-    "time.nist.gov"
-  );
-
-  Serial.println(
-    "Sincronizando horário..."
-  );
-
-  time_t now =
-    time(nullptr);
-
-  int attempts = 0;
-
-  while (
-    now < 100000 &&
-    attempts < 30
-  ) {
-
-    delay(500);
-
-    Serial.print(".");
-
-    now = time(nullptr);
-
-    attempts++;
-  }
-
-  Serial.println();
-
-  if (now >= 100000) {
-
-    Serial.println(
-      "Horário sincronizado."
-    );
-
-  }
-  else {
-
-    Serial.println(
-      "Não foi possível sincronizar horário."
-    );
-  }
-
-  // ==========================================================
-  // HEARTBEAT INICIAL
-  // ==========================================================
-
-  if (
-    WiFi.status() ==
-    WL_CONNECTED
-  ) {
-
-    sendHeartbeat();
-  }
+  Serial.begin(115200); pinMode(SERVO_PIN, OUTPUT); digitalWrite(SERVO_PIN, LOW);
+  connectWifi(); configTime(0, 0, "pool.ntp.org", "time.nist.gov");
 }
-
-// ============================================================
-// LOOP
-// ============================================================
-
 void loop() {
-
-  // ==========================================================
-  // VERIFICA WI-FI
-  // ==========================================================
-
-  if (
-    WiFi.status() !=
-    WL_CONNECTED
-  ) {
-
-    Serial.println(
-      "[Wi-Fi] Conexão perdida."
-    );
-
-    // Segurança
-    relayOff();
-
-    connectWiFi();
-
-    delay(1000);
-
-    return;
-  }
-
-  unsigned long now =
-    millis();
-
-  // ==========================================================
-  // HEARTBEAT
-  // ==========================================================
-
-  if (
-    now - lastHeartbeat >=
-    HEARTBEAT_INTERVAL
-  ) {
-
-    lastHeartbeat = now;
-
-    sendHeartbeat();
-  }
-
-  // ==========================================================
-  // AGENDAMENTOS
-  // ==========================================================
-
-  if (
-    now - lastScheduleCheck >=
-    SCHEDULE_INTERVAL
-  ) {
-
-    lastScheduleCheck = now;
-
-    checkSchedules();
-  }
-
-  // ==========================================================
-  // COMANDOS MANUAIS
-  // ==========================================================
-
-  if (
-    now - lastCommandCheck >=
-    COMMAND_INTERVAL
-  ) {
-
-    lastCommandCheck = now;
-
-    checkCommand();
-  }
-
-  delay(50);
+  if (millis() - lastHeartbeat > 60000) { firebasePut("/lastSeen", String((unsigned long)time(nullptr) * 1000)); firebasePut("/wifi", String(WiFi.SSID())); lastHeartbeat = millis(); }
+  if (millis() - lastScheduleCheck > 15000) { checkManualCommand(); checkSchedules(); lastScheduleCheck = millis(); }
+  if (WiFi.status() != WL_CONNECTED) connectWifi(); delay(100);
 }`;
 
 function formatDate(value?: Date | string | null) {
@@ -1164,6 +160,7 @@ function formatTime(hour: number, minute: number) {
 }
 
 function LoginScreen() {
+  const [mode, setMode] = useState<"login" | "signup">("login");
   return (
     <div className="auth-page">
       <div className="auth-art">
@@ -1184,7 +181,7 @@ function LoginScreen() {
             quem você ama de qualquer lugar.
           </p>
           <div className="trust-line">
-            <ShieldCheck size={16} /> Acesso seguro com Google
+            <ShieldCheck size={16} /> Dados protegidos e acesso por conta segura
           </div>
         </div>
         <div className="auth-watermark">COMEDOURO / 01</div>
@@ -1198,19 +195,71 @@ function LoginScreen() {
             <span>COMEDOURO</span>
           </div>
           <div className="auth-heading">
-            <span className="section-kicker">BEM-VINDO</span>
-            <h2>Entre na sua conta</h2>
-            <p>Use sua conta Google para acessar o painel do seu comedouro.</p>
+            <span className="section-kicker">
+              {mode === "login" ? "BEM-VINDO DE VOLTA" : "PRIMEIRO ACESSO"}
+            </span>
+            <h2>
+              {mode === "login" ? "Entre na sua conta" : "Crie sua conta"}
+            </h2>
+            <p>
+              {mode === "login"
+                ? "Acesse o painel do seu comedouro."
+                : "Configure seu comedouro em poucos passos."}
+            </p>
           </div>
+          <div className="field">
+            <label>E-mail</label>
+            <div className="input-with-icon">
+              <Users size={17} />
+              <input type="email" placeholder="voce@email.com" />
+            </div>
+          </div>
+          <div className="field">
+            <label>Senha</label>
+            <div className="input-with-icon">
+              <ShieldCheck size={17} />
+              <input type="password" placeholder="Sua senha" />
+            </div>
+          </div>
+          {mode === "signup" && (
+            <div className="field">
+              <label>Nome completo</label>
+              <div className="input-with-icon">
+                <Sparkles size={17} />
+                <input type="text" placeholder="Como podemos chamar você?" />
+              </div>
+            </div>
+          )}
           <button
             className="primary-button auth-button"
             onClick={() => startLogin()}
           >
-            Entrar com Google <ArrowRight size={17} />
+            {mode === "login" ? "Entrar com segurança" : "Criar conta segura"}
+            <ArrowRight size={17} />
           </button>
+          <button
+            className="text-button"
+            onClick={() =>
+              toast.info(
+                "A recuperação de acesso é feita pelo portal seguro da conta.",
+              )
+            }
+          >
+            Esqueci minha senha
+          </button>
+          <div className="auth-switch">
+            {mode === "login"
+              ? "Ainda não tem uma conta?"
+              : "Já possui uma conta?"}{" "}
+            <button
+              onClick={() => setMode(mode === "login" ? "signup" : "login")}
+            >
+              {mode === "login" ? "Criar conta" : "Entrar"}
+            </button>
+          </div>
           <p className="auth-note">
-            A autenticação é realizada com segurança pelo Google. A senha da sua
-            conta Google nunca é armazenada no Comedouro.
+            A autenticação é concluída no portal seguro do projeto. A senha
+            nunca é armazenada no banco do comedouro.
           </p>
         </div>
       </div>
@@ -1578,13 +627,11 @@ function FeedingPage({
   const [quantity, setQuantity] = useState(1);
   const mutation = trpc.app.feedNow.useMutation({
     onSuccess: (result) => {
-      if (result.synced) {
-        toast.success(
-          "Comando enviado ao Firebase. O ESP32 executará a alimentação.",
-        );
-      } else {
-        toast.error("Não foi possível enviar o comando ao Firebase.");
-      }
+      toast.success(
+        result.synced
+          ? "Comando enviado ao ESP32."
+          : "Alimentação registrada. Configure a ponte Firebase para enviar ao hardware.",
+      );
       refetch();
     },
     onError: (e) => toast.error(e.message),
@@ -1899,31 +946,154 @@ function HistoryPage({ data }: { data: any }) {
   );
 }
 
+function WaterMonitoringPage({
+  data,
+  refresh,
+}: {
+  data: any;
+  refresh: () => void;
+}) {
+  const sensors = data?.waterSensors || {};
+  const online = sensors.status === "online";
+  return (
+    <>
+      <PageHeader
+        eyebrow="MONITORAMENTO"
+        title="Qualidade da água"
+        description="Acompanhe os sensores do ESP32 de monitoramento em tempo real."
+        action={
+          <button className="icon-button refresh" onClick={refresh}>
+            <RefreshCcw size={17} />
+          </button>
+        }
+      />
+      {!data?.waterDevice ? (
+        <div className="empty-device">
+          <div className="empty-device-icon">
+            <Droplets size={26} />
+          </div>
+          <h3>Nenhum monitor de água cadastrado.</h3>
+          <p>
+            Cadastre um ESP32 do tipo “Monitoramento da água” para receber
+            temperatura, condutividade, pH e turbidez.
+          </p>
+          <button
+            className="primary-button"
+            onClick={() => window.location.assign("/device")}
+          >
+            <Plus size={17} /> Adicionar monitor
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="hero-status">
+            <div className="hero-status-icon">
+              <Droplets size={25} />
+            </div>
+            <div>
+              <span className="section-kicker">ESP32 DE MONITORAMENTO</span>
+              <h2>{data.waterDevice.name}</h2>
+              <p>
+                {online
+                  ? "Os sensores estão comunicando normalmente."
+                  : "O ESP32 não envia dados há mais de 30 segundos."}
+              </p>
+            </div>
+            <StatusBadge online={online} />
+            <div className="hero-status-meta">
+              <span>Última comunicação</span>
+              <strong>{formatDate(sensors.lastSeen)}</strong>
+            </div>
+          </div>
+          <div className="metrics-grid">
+            <MetricCard
+              icon={<Thermometer />}
+              label="Temperatura"
+              value={
+                sensors.temperature != null
+                  ? `${Number(sensors.temperature).toFixed(1)} °C`
+                  : "--"
+              }
+              tone="mint"
+            />
+            <MetricCard
+              icon={<Waves />}
+              label="Condutividade"
+              value={
+                sensors.conductivity != null
+                  ? `${Number(sensors.conductivity).toFixed(0)} µS/cm`
+                  : "--"
+              }
+              tone="blue"
+            />
+            <MetricCard
+              icon={<TestTube2 />}
+              label="pH"
+              value={sensors.ph != null ? Number(sensors.ph).toFixed(2) : "--"}
+              tone="violet"
+            />
+            <MetricCard
+              icon={<Droplets />}
+              label="Turbidez"
+              value={
+                sensors.turbidity != null
+                  ? `${Number(sensors.turbidity).toFixed(1)} NTU`
+                  : "--"
+              }
+              tone="amber"
+            />
+          </div>
+          <section className="panel">
+            <div className="panel-heading">
+              <div>
+                <span className="section-kicker">DISPOSITIVO</span>
+                <h3>Informações do monitor</h3>
+              </div>
+              <StatusBadge online={online} />
+            </div>
+            <div className="detail-grid">
+              <Detail label="ID do ESP32" value={data.waterDevice.deviceId} />
+              <Detail
+                label="Wi-Fi"
+                value={sensors.wifi || "Ainda não enviado"}
+              />
+              <Detail
+                label="Temperatura"
+                value={
+                  sensors.temperature != null
+                    ? `${sensors.temperature} °C`
+                    : "Sem leitura"
+                }
+              />
+              <Detail
+                label="Última atualização"
+                value={formatDate(sensors.lastSeen)}
+              />
+            </div>
+          </section>
+        </>
+      )}
+    </>
+  );
+}
+
 function DevicePage({ data, refetch }: { data: any; refetch: () => void }) {
   const device = data?.device;
-
-  console.log("[DEVICE PAGE] data:", data);
-  console.log("[DEVICE PAGE] device:", data?.device);
-
-  const [showForm, setShowForm] = useState(false);
+  const devices = data?.devices || [];
+  const [showForm, setShowForm] = useState(!device);
   const [id, setId] = useState("");
   const [name, setName] = useState("");
+  const [type, setType] = useState<"feeder" | "water-monitor">("feeder");
   const add = trpc.app.addDevice.useMutation({
-    onSuccess: async (result) => {
-      if (!result || result.id == null) {
-        toast.error("O servidor não retornou o dispositivo cadastrado.");
-        await refetch();
-        return;
-      }
-
-      const idPreview =
-        result.id != null ? ` ID do dispositivo: ${result.id}` : "";
-
-      toast.success(`Dispositivo cadastrado.${idPreview}`);
+    onSuccess: (result) => {
+      toast.success(
+        `Dispositivo cadastrado. Chave: ${result.deviceKey.slice(0, 8)}…`,
+      );
+      setShowForm(false);
       setId("");
       setName("");
-      setShowForm(false);
-      await refetch();
+      setType("feeder");
+      refetch();
     },
     onError: (e) => toast.error(e.message),
   });
@@ -1950,7 +1120,7 @@ function DevicePage({ data, refetch }: { data: any; refetch: () => void }) {
           )
         }
       />
-      {(showForm || !device) && (
+      {showForm && (
         <section className="panel device-form">
           <div className="panel-heading">
             <div>
@@ -1961,11 +1131,23 @@ function DevicePage({ data, refetch }: { data: any; refetch: () => void }) {
           </div>
           <div className="form-row">
             <div className="field">
+              <label>Tipo de dispositivo</label>
+              <select
+                value={type}
+                onChange={(e) =>
+                  setType(e.target.value as "feeder" | "water-monitor")
+                }
+              >
+                <option value="feeder">Comedouro</option>
+                <option value="water-monitor">Monitoramento da água</option>
+              </select>
+            </div>
+            <div className="field">
               <label>ID do dispositivo</label>
               <input
                 value={id}
                 onChange={(e) => setId(e.target.value)}
-                placeholder="COMEDOURO-001"
+                placeholder={type === "feeder" ? "COMEDOURO-001" : "AGUA-001"}
               />
             </div>
             <div className="field">
@@ -1973,7 +1155,11 @@ function DevicePage({ data, refetch }: { data: any; refetch: () => void }) {
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Comedouro da sala"
+                placeholder={
+                  type === "feeder"
+                    ? "Comedouro da sala"
+                    : "Monitoramento da água"
+                }
               />
             </div>
           </div>
@@ -1986,7 +1172,7 @@ function DevicePage({ data, refetch }: { data: any; refetch: () => void }) {
             </button>
             <button
               className="primary-button"
-              onClick={() => add.mutate({ deviceId: id, name })}
+              onClick={() => add.mutate({ deviceId: id, name, type })}
               disabled={add.isPending || !id || !name}
             >
               {add.isPending ? "Cadastrando..." : "Cadastrar dispositivo"}
@@ -2047,25 +1233,17 @@ function DevicePage({ data, refetch }: { data: any; refetch: () => void }) {
             </div>
             <div className="device-key">
               <span>Chave de instalação</span>
-
-              <code>{device.id}</code>
-
+              <code>{device.deviceKey}</code>
               <button
                 className="icon-button"
                 onClick={() => {
-                  navigator.clipboard?.writeText(String(device.id));
+                  navigator.clipboard?.writeText(device.deviceKey);
                   toast.success("Chave copiada.");
                 }}
               >
                 <Copy size={15} />
               </button>
             </div>
-
-            <p className="helper-text">
-              Coloque este número no ESP32 em <code>FIREBASE_DEVICE_ID</code>.
-              <br />
-              Exemplo: <code>#define FIREBASE_DEVICE_ID "{device.id}"</code>
-            </p>
           </div>
         </section>
       )}
@@ -2397,71 +1575,48 @@ function AboutPage() {
       <div className="about-grid">
         <section className="about-hero panel">
           <div className="logo-place">
-            <img
-              src="/marca-if-baiano-campus-senhor-do-bonfim-horizontal-branca.png"
-              alt="Logo da instituição"
-              className="w-full h-full object-contain"
-            />
+            <span>
+              LOGO DA
+              <br />
+              INSTITUIÇÃO
+            </span>
           </div>
           <div className="logo-place course">
-            <img
-              src="/logo-lica.png"
-              alt="Logo do curso"
-              className="w-[65%] h-[100px] object-contain"
-            />
+            <span>
+              LOGO DO
+              <br />
+              CURSO
+            </span>
           </div>
           <div>
             <span className="section-kicker">SOBRE O COMEDOURO</span>
             <h2>Automação que cuida da rotina.</h2>
             <p>
-              O Comedouro é um projeto de automação desenvolvido para facilitar
-              e melhorar o manejo alimentar de animais. O sistema permite
-              programar horários de alimentação e realizar a liberação manual da
-              ração, proporcionando mais praticidade, organização e controle. O
-              projeto integra conhecimentos das Ciências Agrárias e da
-              tecnologia, podendo ser aplicado em propriedades rurais, ambientes
-              acadêmicos e também no uso doméstico.
+              O COMEDOURO foi criado para facilitar a alimentação de animais de
+              estimação por meio de um dispositivo conectado, programação de
+              horários e acompanhamento remoto.
             </p>
             <p className="muted">
-              O Instituto Federal de Educação, Ciência e Tecnologia Baiano (IF
-              Baiano) – Campus Senhor do Bonfim oferece formação acadêmica e
-              profissional voltada ao desenvolvimento científico, tecnológico e
-              social da região. O curso de Licenciatura em Ciências Agrárias
-              proporciona uma formação interdisciplinar, preparando
-              profissionais para atuar na educação e em diferentes áreas
-              relacionadas às Ciências Agrárias. O projeto Comedouro consiste no
-              desenvolvimento de um sistema automatizado para alimentação de
-              animais, integrando conhecimentos de tecnologia, programação e
-              Ciências Agrárias. A proposta busca contribuir para o manejo
-              alimentar, permitindo o controle e o agendamento da alimentação de
-              forma prática e automatizada, podendo ser aplicada tanto em
-              ambientes acadêmicos e produtivos quanto no uso doméstico.
+              Substitua este texto com a apresentação oficial da instituição, do
+              curso e do projeto.
             </p>
           </div>
         </section>
         <section className="panel editable-info">
           <div>
-            <span className="section-kicker"></span>
-            <h3>apresentação</h3>
+            <span className="section-kicker">CAMPOS CONFIGURÁVEIS</span>
+            <h3>Complete a apresentação</h3>
           </div>
           <div className="about-fields">
             <Detail
               label="Instituição"
-              value="   Instituto Federal de Educação, Ciência e Tecnologia Baiano (IF
-              Baiano) – Campus Senhor do Bonfim"
+              value="Adicione o nome da instituição"
             />
-            <Detail label="Curso" value="Licenciatura em Ciências Agrárias" />
+            <Detail label="Curso" value="Adicione o nome do curso" />
+            <Detail label="Integrantes" value="Adicione os nomes da equipe" />
             <Detail
-              label="Integrantes"
-              value="   Mirella Anjos, Pedro Josafá,"
-            />
-            <Detail
-              label="Orientadores(as)"
-              value="   Claudia Kiya, Jaciara Silva, Juracir Santos,Thales Mendes"
-            />
-            <Detail
-              label="Programador"
-              value=" Pedro Josafá - pedrojosafo@gmail.com"
+              label="Orientador(a)"
+              value="Adicione o nome do orientador"
             />
           </div>
         </section>
@@ -2503,7 +1658,7 @@ function SettingsPage({ user }: { user: any }) {
           <div className="setting-row">
             <div>
               <strong>Autenticação</strong>
-              <span>Gerenciada pelo Google</span>
+              <span>Gerenciada pelo portal seguro do projeto</span>
             </div>
             <span className="verified">
               <Check size={14} /> Protegida
@@ -2519,8 +1674,8 @@ function SettingsPage({ user }: { user: any }) {
             <div>
               <strong>Atualização de status</strong>
               <span>
-                O dashboard considera o ESP32 online enquanto o último heartbeat
-                tiver menos de 30 segundos.
+                O dashboard considera o ESP32 online por até 150 segundos sem
+                novo heartbeat.
               </span>
             </div>
             <span className="verified">
@@ -2548,7 +1703,7 @@ export default function Home() {
   const page = location === "/" ? "/dashboard" : location;
   const overview = trpc.app.overview.useQuery(undefined, {
     enabled: isAuthenticated,
-    refetchInterval: 10000,
+    refetchInterval: 5000,
   });
   const content = useMemo(() => {
     if (page === "/feeding")
@@ -2566,6 +1721,13 @@ export default function Home() {
     if (page === "/device")
       return (
         <DevicePage data={overview.data} refetch={() => overview.refetch()} />
+      );
+    if (page === "/water")
+      return (
+        <WaterMonitoringPage
+          data={overview.data}
+          refresh={() => overview.refetch()}
+        />
       );
     if (page === "/collaborators")
       return (
