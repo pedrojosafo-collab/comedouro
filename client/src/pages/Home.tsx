@@ -68,33 +68,34 @@ const esp32Code = `#include <WiFi.h>
 // CONFIGURAÇÕES DO FIREBASE
 // ============================================================
 
-// Firebase Realtime Database
-#define FIREBASE_URL    "COLOQUE_O_SEU"
-#define FIREBASE_SECRET "COLOQUE_SEU_SECRET"
+#define FIREBASE_URL    "seu-aqui"
+#define FIREBASE_SECRET "coloque-aqui"
 
 // ============================================================
 // ID DO DISPOSITIVO
 // ============================================================
 
-// Deve ser EXATAMENTE o mesmo ID cadastrado no site.
-#define FIREBASE_DEVICE_ID "ID_QUE_MOSTRA_NO_SITE"
+// ID numérico cadastrado no site/Firebase
+#define FIREBASE_DEVICE_ID "esta_no_site"
 
-// ID usado nos registros
-#define DEVICE_ID  "SEU_ID"
+// ID físico do ESP32
+#define DEVICE_ID "Nome_que_voçê_colocou"
 
 // ============================================================
 // RELÉ
 // ============================================================
 
-// GPIO conectado ao IN do módulo relé
 #define FEED_PIN 32
 
 // true  = relé ativa com LOW
 // false = relé ativa com HIGH
 #define RELAY_ACTIVE_LOW true
 
-// Tempo que o motor ficará ligado
-#define FEED_TIME_MS 3000
+// Tempo do motor ligado para liberar UMA porção
+#define FEED_TIME_MS 1000
+
+// Intervalo entre porções
+#define PORTION_INTERVAL_MS 1000
 
 // ============================================================
 // INTERVALOS
@@ -136,7 +137,7 @@ void relayOn() {
 
   if (RELAY_ACTIVE_LOW) {
     digitalWrite(FEED_PIN, LOW);
-  } 
+  }
   else {
     digitalWrite(FEED_PIN, HIGH);
   }
@@ -152,7 +153,7 @@ void relayOff() {
 
   if (RELAY_ACTIVE_LOW) {
     digitalWrite(FEED_PIN, HIGH);
-  } 
+  }
   else {
     digitalWrite(FEED_PIN, LOW);
   }
@@ -194,7 +195,6 @@ bool firebasePut(String path, String json) {
   String response = http.getString();
 
   if (response.length() > 0) {
-
     Serial.print("Resposta: ");
     Serial.println(response);
   }
@@ -232,7 +232,6 @@ String firebaseGet(String path) {
   String response = http.getString();
 
   if (response.length() > 0) {
-
     Serial.print("Resposta: ");
     Serial.println(response);
   }
@@ -274,7 +273,6 @@ bool firebaseDelete(String path) {
   String response = http.getString();
 
   if (response.length() > 0) {
-
     Serial.println(response);
   }
 
@@ -359,7 +357,7 @@ void sendHeartbeat() {
       "[Heartbeat] Firebase atualizado."
     );
 
-  } 
+  }
   else {
 
     Serial.println(
@@ -383,50 +381,48 @@ void registerFeeding(
   long long timestamp =
     (long long)now * 1000LL;
 
-  // ------------------------------------------------------------
+  // ==========================================================
   // ÚLTIMA ALIMENTAÇÃO
-  // ------------------------------------------------------------
+  // ==========================================================
+  //
+  // IMPORTANTE:
+  // O site espera que lastFeeding seja um timestamp numérico.
+  //
+  // Antes estava sendo salvo um objeto JSON.
+  // Agora será:
+  //
+  // lastFeeding: 1790900825000
+  //
+  // ==========================================================
 
-  String lastJson = "{";
+  bool lastFeedingOK =
+    firebasePut(
+      "/lastFeeding",
+      String(timestamp)
+    );
 
-  lastJson += "\"createdAt\":" +
-              String(timestamp) +
-              ",";
+  if (lastFeedingOK) {
 
-  lastJson += "\"timestamp\":" +
-              String(timestamp) +
-              ",";
+    Serial.println(
+      "[Feeding] lastFeeding salvo com sucesso."
+    );
 
-  lastJson += "\"type\":\"" +
-              type +
-              "\",";
+  }
+  else {
 
-  lastJson += "\"quantity\":" +
-              String(quantity) +
-              ",";
+    Serial.println(
+      "[Feeding] ERRO ao salvar lastFeeding."
+    );
+  }
 
-  lastJson += "\"deviceId\":\"" +
-              String(DEVICE_ID) +
-              "\",";
-
-  lastJson += "\"commandId\":\"" +
-              commandId +
-              "\"";
-
-  lastJson += "}";
-
-  firebasePut(
-    "/lastFeeding",
-    lastJson
-  );
-
-  // ------------------------------------------------------------
+  // ==========================================================
   // HISTÓRICO
-  // ------------------------------------------------------------
+  // ==========================================================
 
-  // Usa timestamp + millis para evitar colisões de chave.
   String historyId =
-    String(timestamp) + "_" + String(millis());
+    String(timestamp) +
+    "_" +
+    String(millis());
 
   String historyJson = "{";
 
@@ -458,23 +454,47 @@ void registerFeeding(
 
   historyJson += "}";
 
-  firebasePut(
-    "/history/" + historyId,
-    historyJson
-  );
+  bool historyOK =
+    firebasePut(
+      "/history/" + historyId,
+      historyJson
+    );
+
+  if (historyOK) {
+
+    Serial.println(
+      "[Feeding] Histórico salvo com sucesso."
+    );
+
+  }
+  else {
+
+    Serial.println(
+      "[Feeding] ERRO ao salvar histórico."
+    );
+  }
+
+  // ==========================================================
+  // ÚLTIMO EVENTO
+  // ==========================================================
 
   firebasePut(
     "/lastEvent",
     "\"feeding\""
   );
 
+  // ==========================================================
+  // ÚLTIMO COMANDO
+  // ==========================================================
+
   firebasePut(
     "/lastCommandId",
     "\"" + commandId + "\""
   );
 
+  Serial.println();
   Serial.println(
-    "[Feeding] Alimentação registrada no histórico."
+    "[Feeding] Alimentação registrada."
   );
 }
 
@@ -488,6 +508,11 @@ void feedFish(
   String commandId
 ) {
 
+  // Garante pelo menos 1 porção
+  if (quantity < 1) {
+    quantity = 1;
+  }
+
   Serial.println();
   Serial.println("==============================");
   Serial.println("    ALIMENTAÇÃO INICIADA");
@@ -496,25 +521,55 @@ void feedFish(
   Serial.print("Tipo: ");
   Serial.println(type);
 
-  Serial.print("Quantidade: ");
+  Serial.print("Porções: ");
   Serial.println(quantity);
 
   Serial.print("Command ID: ");
   Serial.println(commandId);
 
-  // Liga motor
-  relayOn();
+  // ==========================================================
+  // CADA PORÇÃO = UMA ATIVAÇÃO DO MOTOR
+  // ==========================================================
 
-  delay(FEED_TIME_MS);
+  for (int i = 1; i <= quantity; i++) {
 
-  // Desliga motor
-  relayOff();
+    Serial.println();
+    Serial.print("[Porção ");
+    Serial.print(i);
+    Serial.print(" de ");
+    Serial.print(quantity);
+    Serial.println("]");
 
+    // Liga motor
+    relayOn();
+
+    // Tempo para liberar uma porção
+    delay(FEED_TIME_MS);
+
+    // Desliga motor
+    relayOff();
+
+    Serial.print("[Porção ");
+    Serial.print(i);
+    Serial.println("] liberada.");
+
+    // Intervalo entre porções
+    if (i < quantity) {
+
+      Serial.print("Aguardando ");
+      Serial.print(PORTION_INTERVAL_MS);
+      Serial.println(" ms...");
+
+      delay(PORTION_INTERVAL_MS);
+    }
+  }
+
+  Serial.println();
   Serial.println(
-    "Motor desligado."
+    "Todas as porções foram liberadas."
   );
 
-  // Registra no Firebase
+  // Registra alimentação
   registerFeeding(
     type,
     quantity,
@@ -620,7 +675,7 @@ void checkCommand() {
   // Guarda comando
   lastCommandId = commandId;
 
-  // Remove comando do Firebase
+  // Remove comando
   firebaseDelete("/command");
 
   Serial.println(
@@ -629,7 +684,7 @@ void checkCommand() {
 }
 
 // ============================================================
-// VERIFICA AGENDAMENTOS
+// DATA/HORA ATUAL
 // ============================================================
 
 String currentDateTimeKey() {
@@ -652,9 +707,8 @@ String currentDateTimeKey() {
   return String(buffer);
 }
 
-
 // ============================================================
-// EXECUTA AGENDAMENTO
+// VERIFICA AGENDAMENTOS
 // ============================================================
 
 void checkSchedules() {
@@ -670,6 +724,7 @@ void checkSchedules() {
     response.length() == 0 ||
     response == "null"
   ) {
+
     return;
   }
 
@@ -763,7 +818,8 @@ void checkSchedules() {
       continue;
     }
 
-    // Uma execução por agendamento em cada minuto/dia.
+    // Uma execução por agendamento
+    // no mesmo minuto
     String executionKey =
       String(scheduleId) +
       "|" +
@@ -789,16 +845,21 @@ void checkSchedules() {
     Serial.println(
       "=============================="
     );
+
     Serial.println(
       "[Schedule] AGENDAMENTO ENCONTRADO"
     );
+
     Serial.print("ID: ");
     Serial.println(scheduleId);
+
     Serial.print("Horário: ");
 
     if (hour < 10) Serial.print("0");
     Serial.print(hour);
+
     Serial.print(":");
+
     if (minute < 10) Serial.print("0");
     Serial.println(minute);
 
@@ -815,14 +876,14 @@ void checkSchedules() {
       commandId
     );
 
-    // Não executa outro agendamento no mesmo ciclo.
+    // Não executa outro agendamento
+    // no mesmo ciclo
     break;
   }
 }
 
-
 // ============================================================
-// CONFIGURAÇÃO DO WI-FI PELO CELULAR
+// CONFIGURAÇÃO DO WI-FI
 // ============================================================
 
 void connectWiFi() {
@@ -836,7 +897,6 @@ void connectWiFi() {
 
   WiFiManager wm;
 
-  // Tempo máximo do portal de configuração
   wm.setConfigPortalTimeout(180);
 
   Serial.println(
@@ -861,7 +921,7 @@ void connectWiFi() {
 
     ESP.restart();
 
-  } 
+  }
   else {
 
     Serial.println();
@@ -935,7 +995,7 @@ void setup() {
     OUTPUT
   );
 
-  // Garante motor desligado
+  // Motor desligado
   relayOff();
 
   // ==========================================================
@@ -992,7 +1052,7 @@ void setup() {
       "Horário sincronizado."
     );
 
-  } 
+  }
   else {
 
     Serial.println(
@@ -1032,7 +1092,7 @@ void loop() {
       "[Wi-Fi] Conexão perdida."
     );
 
-    // Segurança: motor desligado
+    // Segurança
     relayOff();
 
     connectWiFi();
