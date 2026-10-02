@@ -2039,7 +2039,6 @@ function formatTime(hour: number, minute: number) {
 }
 
 function LoginScreen() {
-  const [mode, setMode] = useState<"login" | "signup">("login");
   return (
     <div className="auth-page">
       <div className="auth-art">
@@ -2059,9 +2058,6 @@ function LoginScreen() {
             Acompanhe seu comedouro, programe refeições e cuide da rotina de
             quem você ama de qualquer lugar.
           </p>
-          <div className="trust-line">
-            <ShieldCheck size={16} /> Dados protegidos e acesso por conta segura
-          </div>
         </div>
         <div className="auth-watermark">COMEDOURO / 01</div>
       </div>
@@ -2074,67 +2070,17 @@ function LoginScreen() {
             <span>COMEDOURO</span>
           </div>
           <div className="auth-heading">
-            <span className="section-kicker">
-              {mode === "login" ? "BEM-VINDO DE VOLTA" : "PRIMEIRO ACESSO"}
-            </span>
-            <h2>
-              {mode === "login" ? "Entre na sua conta" : "Crie sua conta"}
-            </h2>
-            <p>
-              {mode === "login"
-                ? "Acesse o painel do seu comedouro."
-                : "Configure seu comedouro em poucos passos."}
-            </p>
+            <span className="section-kicker">ACESSO</span>
+            <h2>Entrar no COMEDOURO</h2>
+            <p>Acesse o painel do seu comedouro.</p>
           </div>
-          <div className="field">
-            <div className="input-with-icon">
-              <Users size={17} />
-          </div>
-          <div className="field">
-            <label>Senha</label>
-            <div className="input-with-icon">
-              <ShieldCheck size={17} />
-          </div>
-          {mode === "signup" && (
-            <div className="field">
-              <label>Nome completo</label>
-              <div className="input-with-icon">
-                <Sparkles size={17} />
-                <input type="text" placeholder="Como podemos chamar você?" />
-              </div>
-            </div>
-          )}
           <button
             className="primary-button auth-button"
             onClick={() => startLogin()}
           >
-            {mode === "login" ? "Entrar com segurança" : "Criar conta segura"}
+            Entrar no sistema
             <ArrowRight size={17} />
           </button>
-          <button
-            className="text-button"
-            onClick={() =>
-              toast.info(
-                "A recuperação de acesso é feita pelo portal seguro da conta.",
-              )
-            }
-          >
-            Esqueci minha senha
-          </button>
-          <div className="auth-switch">
-            {mode === "login"
-              ? "Ainda não tem uma conta?"
-              : "Já possui uma conta?"}{" "}
-            <button
-              onClick={() => setMode(mode === "login" ? "signup" : "login")}
-            >
-              {mode === "login" ? "Criar conta" : "Entrar"}
-            </button>
-          </div>
-          <p className="auth-note">
-            A autenticação é concluída no portal seguro do projeto. A senha
-            nunca é armazenada no banco do comedouro.
-          </p>
         </div>
       </div>
     </div>
