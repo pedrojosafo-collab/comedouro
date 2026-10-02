@@ -73,17 +73,17 @@ const esp32Code = `#include <WiFi.h>
 // ============================================================
 
 #define FIREBASE_URL    "https://comedouro-a8211-default-rtdb.firebaseio.com"
-#define FIREBASE_SECRET "6hJNKGBnBFz6d6NHT43eXA5RwijgBc8IrIX5g3il"
+#define FIREBASE_SECRET "..."
 
 // ============================================================
 // ID DO DISPOSITIVO
 // ============================================================
 
 // ID numérico cadastrado no site/Firebase
-#define FIREBASE_DEVICE_ID "4"
+#define FIREBASE_DEVICE_ID "..."
 
 // ID físico do ESP32
-#define DEVICE_ID "comedouro-001"
+#define DEVICE_ID "...."
 
 // ============================================================
 // RELÉ
@@ -1169,7 +1169,7 @@ const esp32Code = `//MONITORAMENTO DE AGUA// #include <WiFi.h>
 // ============================================================
 
 #define FIREBASE_URL    "https://comedouro-a8211-default-rtdb.firebaseio.com"
-#define FIREBASE_SECRET "6hJNKGBnBFz6d6NHT43eXA5RwijgBc8IrIX5g3il"
+#define FIREBASE_SECRET "..."
 
 // ============================================================
 // IDENTIFICAÇÃO DO ESP32
@@ -1177,10 +1177,10 @@ const esp32Code = `//MONITORAMENTO DE AGUA// #include <WiFi.h>
 
 // ID NUMÉRICO cadastrado no site/Firebase
 // Exemplo: devices/5
-#define FIREBASE_DEVICE_ID "5"
+#define FIREBASE_DEVICE_ID "..."
 
 // ID físico do ESP32
-#define DEVICE_ID "agua-001"
+#define DEVICE_ID "..."
 
 // ============================================================
 // TIPO DO DISPOSITIVO
