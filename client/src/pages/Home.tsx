@@ -3391,54 +3391,75 @@ function AboutPage() {
       <PageHeader
         eyebrow="INSTITUCIONAL"
         title="Sobre o projeto"
-        description="Um espaço para apresentar a história, a instituição e as pessoas por trás do COMEDOURO."
+        description="Conheça a instituição, o curso e a equipe responsável pelo desenvolvimento do COMEDOURO."
       />
+
       <div className="about-grid">
         <section className="about-hero panel">
           <div className="logo-place">
-            <span>
-              LOGO DA
-              <br />
-              INSTITUIÇÃO
-            </span>
+            <img src="/logo-lica.png" alt="Logo do LICA" />
           </div>
+
           <div className="logo-place course">
-            <span>
-              LOGO DO
-              <br />
-              CURSO
-            </span>
+            <img
+              src="/marca-if-baiano-campus-senhor-do-bonfim-horizontal-branca.png"
+              alt="Instituto Federal Baiano - Campus Senhor do Bonfim"
+            />
           </div>
+
           <div>
             <span className="section-kicker">SOBRE O COMEDOURO</span>
+
             <h2>Automação que cuida da rotina.</h2>
+
             <p>
-              O COMEDOURO foi criado para facilitar a alimentação de animais de
-              estimação por meio de um dispositivo conectado, programação de
-              horários e acompanhamento remoto.
+              O COMEDOURO é um projeto desenvolvido com o objetivo de
+              proporcionar automação e praticidade na alimentação de animais,
+              utilizando tecnologia, programação e conectividade para facilitar
+              o controle dos horários e das porções.
             </p>
-            <p className="muted">
-              Substitua este texto com a apresentação oficial da instituição, do
-              curso e do projeto.
+
+            <p>
+              O projeto integra conhecimentos de tecnologia e Ciências Agrárias,
+              buscando desenvolver uma solução acessível para automatizar a
+              alimentação e permitir o acompanhamento do dispositivo de forma
+              remota.
             </p>
           </div>
         </section>
+
         <section className="panel editable-info">
           <div>
-            <span className="section-kicker">CAMPOS CONFIGURÁVEIS</span>
-            <h3>Complete a apresentação</h3>
+            <span className="section-kicker">INFORMAÇÕES DO PROJETO</span>
+            <h3>Equipe e instituição</h3>
           </div>
+
           <div className="about-fields">
             <Detail
               label="Instituição"
-              value="Adicione o nome da instituição"
+              value="Instituto Federal de Educação, Ciência e Tecnologia Baiano – Campus Senhor do Bonfim"
             />
-            <Detail label="Curso" value="Adicione o nome do curso" />
-            <Detail label="Integrantes" value="Adicione os nomes da equipe" />
+
             <Detail
-              label="Orientador(a)"
-              value="Adicione o nome do orientador"
+              label="Cursos"
+              value="Licenciatura em Ciências Agrárias e Técnico em Agropecuária. "
             />
+
+            <Detail
+              label="Projeto"
+              value="COMEDOURO – Sistema Automatizado de Alimentação"
+            />
+
+            <Detail
+              label="PROFESSORES ORIENTADORES"
+              value="Claudia Kiya, Jaciara Silva, Juracir Santos e Thales Mendes"
+            />
+
+            <Detail
+              label="ALUNOS ORIENTADORES"
+              value="Mirella Anjos e Pedro Josafá"
+            />
+            <Detail label="ALUNOS" value="Davi Santos e Pedro Júnior" />
           </div>
         </section>
       </div>
