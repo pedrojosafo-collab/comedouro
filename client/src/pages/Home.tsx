@@ -3568,7 +3568,7 @@ export default function Home() {
         refresh={() => overview.refetch()}
       />
     );
-  }, [page, overview.data, user, setLocation]);
+  }, [page, overview.data, overview.refetch, user, setLocation]);
   if (loading)
     return (
       <div className="loading-screen">
