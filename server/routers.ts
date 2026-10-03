@@ -762,7 +762,18 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         const access = await requireDevice(ctx.user, input.deviceId);
 
-        if (access.device.type !== "feeder") {
+        const firebaseDevice = await firebaseRead<{
+          type?: string;
+          deviceId?: string;
+        }>(firebaseDevicePath(access.device.id));
+
+        const isFeeder =
+          access.device.type === "feeder" ||
+          firebaseDevice?.type === "feeder" ||
+          firebaseDevice?.type === "comedouro" ||
+          access.device.deviceId.toLowerCase().includes("comedouro");
+
+        if (!isFeeder) {
           throw new TRPCError({
             code: "BAD_REQUEST",
             message: "Este dispositivo não é um comedouro.",
