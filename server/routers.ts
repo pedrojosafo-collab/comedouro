@@ -393,13 +393,13 @@ export const appRouter = router({
         // Isso evita que o heartbeat do segundo ESP32 faça o site confundir
         // o monitor de água com o comedouro.
         const feeder =
-          devicesWithFirebase.find((item) => item.local.type === "feeder") ??
           devicesWithFirebase.find(
             (item) =>
               item.remote?.type === "feeder" ||
               item.remote?.type === "comedouro" ||
+              item.local.type === "feeder" ||
               item.local.deviceId.toLowerCase().includes("comedouro"),
-          );
+          ) ?? null;
 
         /* =================================================
              IDENTIFICAR MONITOR DE ÁGUA
