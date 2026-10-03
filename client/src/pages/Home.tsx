@@ -3490,8 +3490,8 @@ function AboutPage() {
 
           <div className="about-fields">
             <Detail
-              label="Instituição"
-              value="   Instituto Federal de Educação, Ciência e Tecnologia Baiano – Campus Senhor do Bonfim"
+              value="Instituição"
+              label="   Instituto Federal de Educação, Ciência e Tecnologia Baiano – Campus Senhor do Bonfim"
             />
 
             <Detail
