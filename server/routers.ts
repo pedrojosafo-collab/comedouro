@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
+
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
@@ -123,6 +124,7 @@ async function firebaseRead<T>(path: string): Promise<T | undefined> {
 
     if (!response.ok) {
       console.error(`[Firebase] GET ${path} -> ${response.status}`);
+
       return undefined;
     }
 
@@ -133,6 +135,7 @@ async function firebaseRead<T>(path: string): Promise<T | undefined> {
     return JSON.parse(body) as T;
   } catch (error) {
     console.error(`[Firebase] GET ${path} failed`, error);
+
     return undefined;
   }
 }
@@ -156,6 +159,7 @@ async function firebaseDelete(path: string) {
     return response.ok;
   } catch (error) {
     console.error(`[Firebase] DELETE ${path} failed`, error);
+
     return false;
   }
 }
@@ -329,8 +333,8 @@ export const appRouter = router({
         }
 
         /* =================================================
-           LER TODOS OS DISPOSITIVOS
-           ================================================= */
+             LER TODOS OS DISPOSITIVOS
+             ================================================= */
 
         const devicesWithFirebase = await Promise.all(
           devices.map(async (device) => {
@@ -344,10 +348,12 @@ export const appRouter = router({
               type?: string;
               ownerId?: number;
               ownerUid?: string;
+
               status?: string;
               lastSeen?: number | null;
               lastFeeding?: number | null;
               wifi?: number | null;
+
               temperature?: number | null;
               conductivity?: number | null;
               ph?: number | null;
@@ -380,9 +386,12 @@ export const appRouter = router({
         );
 
         /* =================================================
-           IDENTIFICAR COMEDOURO
-           ================================================= */
+             IDENTIFICAR COMEDOURO
+             ================================================= */
 
+        // IMPORTANTE: o tipo cadastrado no banco local é a fonte principal.
+        // Isso evita que o heartbeat do segundo ESP32 faça o site confundir
+        // o monitor de água com o comedouro.
         const feeder =
           devicesWithFirebase.find(
             (item) =>
@@ -393,8 +402,8 @@ export const appRouter = router({
           ) ?? null;
 
         /* =================================================
-           IDENTIFICAR MONITOR DE ÁGUA
-           ================================================= */
+             IDENTIFICAR MONITOR DE ÁGUA
+             ================================================= */
 
         const waterDevice =
           devicesWithFirebase.find(
@@ -410,15 +419,19 @@ export const appRouter = router({
           );
 
         /* =================================================
-           DADOS DO COMEDOURO
-           ================================================= */
+             DADOS DO COMEDOURO
+             ================================================= */
 
         const device = feeder?.local
           ? {
               ...feeder.local,
+
               lastSeen: feeder.lastSeen,
+
               wifi: feeder.remote?.wifi ?? feeder.local.wifi,
+
               status: feeder.online ? "online" : "offline",
+
               lastFeeding: feeder.remote?.lastFeeding
                 ? new Date(feeder.remote.lastFeeding)
                 : feeder.local.lastFeeding,
@@ -426,17 +439,23 @@ export const appRouter = router({
           : null;
 
         /* =================================================
-           SENSORES DA ÁGUA
-           ================================================= */
+             SENSORES DA ÁGUA
+             ================================================= */
 
         const waterSensors = waterDevice?.remote
           ? {
               temperature: waterDevice.remote.temperature ?? null,
+
               conductivity: waterDevice.remote.conductivity ?? null,
+
               ph: waterDevice.remote.ph ?? null,
+
               turbidity: waterDevice.remote.turbidity ?? null,
+
               lastSeen: waterDevice.lastSeen,
+
               status: waterDevice.online ? "online" : "offline",
+
               wifi: waterDevice.remote.wifi ?? null,
             }
           : {
@@ -450,8 +469,8 @@ export const appRouter = router({
             };
 
         /* =================================================
-           FIREBASE HISTORY DO COMEDOURO
-           ================================================= */
+             FIREBASE HISTORY DO COMEDOURO
+             ================================================= */
 
         let remoteHistory:
           | Record<
@@ -478,8 +497,8 @@ export const appRouter = router({
         }
 
         /* =================================================
-           ALIMENTAÇÕES LOCAIS
-           ================================================= */
+             ALIMENTAÇÕES LOCAIS
+             ================================================= */
 
         let localFeedings: Awaited<ReturnType<typeof db.getDeviceFeedings>> =
           [];
@@ -489,8 +508,8 @@ export const appRouter = router({
         }
 
         /* =================================================
-           ALIMENTAÇÕES DO FIREBASE
-           ================================================= */
+             ALIMENTAÇÕES DO FIREBASE
+             ================================================= */
 
         const remoteAutomatic = Object.entries(remoteHistory ?? {})
           .filter(
@@ -498,13 +517,18 @@ export const appRouter = router({
           )
           .map(([key, item]) => ({
             id: -Number(key.slice(-8)) || 0,
+
             deviceId: feeder!.local.id,
+
             type:
               item.type === "manual"
                 ? ("manual" as const)
                 : ("automatic" as const),
+
             quantity: item.quantity ?? 1,
+
             scheduledTime: null,
+
             createdAt: new Date(
               item.createdAt !== undefined
                 ? Number(item.createdAt)
@@ -517,8 +541,8 @@ export const appRouter = router({
           .slice(0, 100);
 
         /* =================================================
-           AGENDAMENTOS
-           ================================================= */
+             AGENDAMENTOS
+             ================================================= */
 
         let schedules: Awaited<ReturnType<typeof db.getDeviceSchedules>> = [];
 
@@ -527,8 +551,8 @@ export const appRouter = router({
         }
 
         /* =================================================
-           COLABORADORES
-           ================================================= */
+             COLABORADORES
+             ================================================= */
 
         let collaborators: Awaited<
           ReturnType<typeof db.getDeviceCollaborators>
@@ -539,32 +563,40 @@ export const appRouter = router({
         }
 
         /* =================================================
-           RETORNO
-           ================================================= */
+             RETORNO
+             ================================================= */
 
         return {
           device,
 
           devices: devicesWithFirebase.map((item) => ({
             ...item.local,
+
             status: item.online ? "online" : "offline",
+
             lastSeen: item.lastSeen,
+
             type: item.local.type ?? item.remote?.type ?? "feeder",
           })),
 
           waterDevice: waterDevice?.local
             ? {
                 ...waterDevice.local,
+
                 status: waterDevice.online ? "online" : "offline",
+
                 lastSeen: waterDevice.lastSeen,
+
                 type: waterDevice.remote?.type ?? "water-monitor",
               }
             : null,
 
           waterSensors,
+
           schedules,
           feedings,
           collaborators,
+
           firebaseConfigured: Boolean(firebaseUrl),
         };
       } catch (error) {
@@ -605,8 +637,11 @@ export const appRouter = router({
 
         const device = await db.createDevice({
           deviceId: input.deviceId,
+
           ownerId: ctx.user.id,
+
           name: input.name,
+
           deviceKey: randomUUID(),
         });
 
@@ -615,6 +650,7 @@ export const appRouter = router({
         if (!device || !device.id) {
           throw new TRPCError({
             code: "INTERNAL_SERVER_ERROR",
+
             message: "Não foi possível criar o dispositivo no banco de dados.",
           });
         }
@@ -623,20 +659,32 @@ export const appRouter = router({
 
         const firebaseDevice = {
           id: device.id,
+
           deviceId: device.deviceId,
+
           deviceKey: device.deviceKey,
+
           name: device.name,
+
           type: input.type,
+
           ownerId: device.ownerId,
+
           ownerUid: ctx.user.openId,
+
           status: "offline",
+
           lastSeen: null,
+
           lastFeeding: null,
+
           wifi: null,
+
           command: null,
+
           history: null,
 
-          // NÃO cria mais schedules dentro de devices/4
+          schedules: null,
 
           temperature: input.type === "water-monitor" ? null : undefined,
 
@@ -653,10 +701,15 @@ export const appRouter = router({
 
         return {
           id: device.id,
+
           deviceId: device.deviceId,
+
           name: device.name,
+
           type: input.type,
+
           deviceKey: device.deviceKey,
+
           synced: sync.synced,
         };
       }),
@@ -702,6 +755,7 @@ export const appRouter = router({
       .input(
         z.object({
           deviceId: z.number(),
+
           quantity: z.number().int().min(1).max(10).default(1),
         }),
       )
@@ -716,14 +770,20 @@ export const appRouter = router({
         }
 
         const now = Date.now();
+
         const requestId = randomUUID();
 
         const command = {
           requestId,
+
           feed: true,
+
           type: "manual",
+
           quantity: input.quantity,
+
           requestedAt: now,
+
           requestedBy: ctx.user.email ?? ctx.user.name ?? "usuário",
         };
 
@@ -737,6 +797,7 @@ export const appRouter = router({
         if (!sync.synced) {
           throw new TRPCError({
             code: "INTERNAL_SERVER_ERROR",
+
             message: "Não foi possível enviar o comando para o Firebase.",
           });
         }
@@ -765,16 +826,36 @@ export const appRouter = router({
 
         const schedule = await db.createSchedule({
           deviceId: input.deviceId,
+
           hour: input.hour,
+
           minute: input.minute,
+
           quantity: input.quantity,
+
           active: true,
         });
 
-        // IMPORTANTE:
-        // O agendamento continua sendo salvo no banco
-        // normalmente, mas NÃO é mais criado/sincronizado
-        // dentro de devices/{id}/schedules.
+        const rows = await db.getDeviceSchedules(input.deviceId);
+
+        const firebaseSchedules = Object.fromEntries(
+          rows.map((s) => [
+            String(s.id),
+            {
+              hour: s.hour,
+
+              minute: s.minute,
+
+              quantity: s.quantity,
+
+              active: s.active,
+            },
+          ]),
+        );
+
+        await firebasePatch(firebaseDevicePath(access.device.id), {
+          schedules: firebaseSchedules,
+        });
 
         return {
           id: schedule.id,
@@ -789,6 +870,7 @@ export const appRouter = router({
       .input(
         z.object({
           scheduleId: z.number(),
+
           active: z.boolean(),
         }),
       )
@@ -815,6 +897,7 @@ export const appRouter = router({
         if (!found) {
           throw new TRPCError({
             code: "NOT_FOUND",
+
             message: "Agendamento não encontrado.",
           });
         }
@@ -831,7 +914,24 @@ export const appRouter = router({
           active: input.active,
         });
 
-        // NÃO sincroniza mais schedules para devices/{id}.
+        const rows = await db.getDeviceSchedules(found.deviceId);
+
+        await firebasePatch(firebaseDevicePath(access.device.id), {
+          schedules: Object.fromEntries(
+            rows.map((s) => [
+              String(s.id),
+              {
+                hour: s.hour,
+
+                minute: s.minute,
+
+                quantity: s.quantity,
+
+                active: s.active,
+              },
+            ]),
+          ),
+        });
 
         return {
           success: true,
@@ -871,6 +971,7 @@ export const appRouter = router({
         if (!found) {
           throw new TRPCError({
             code: "NOT_FOUND",
+
             message: "Agendamento não encontrado.",
           });
         }
@@ -885,7 +986,29 @@ export const appRouter = router({
 
         await db.deleteSchedule(found.id);
 
-        // NÃO sincroniza mais schedules para devices/{id}.
+        const rows = await db.getDeviceSchedules(found.deviceId);
+
+        const firebaseSchedules =
+          rows.length > 0
+            ? Object.fromEntries(
+                rows.map((s) => [
+                  String(s.id),
+                  {
+                    hour: s.hour,
+
+                    minute: s.minute,
+
+                    quantity: s.quantity,
+
+                    active: s.active,
+                  },
+                ]),
+              )
+            : null;
+
+        await firebasePatch(firebaseDevicePath(access.device.id), {
+          schedules: firebaseSchedules,
+        });
 
         return {
           success: true,
@@ -900,7 +1023,9 @@ export const appRouter = router({
       .input(
         z.object({
           deviceId: z.number(),
+
           email: z.string().email(),
+
           role: z
             .enum(["administrator", "collaborator"])
             .default("collaborator"),
@@ -924,7 +1049,9 @@ export const appRouter = router({
 
         const collaborator = await db.createCollaborator({
           deviceId: input.deviceId,
+
           email: input.email.toLowerCase(),
+
           role: input.role,
         });
 
@@ -967,6 +1094,7 @@ export const appRouter = router({
         if (!found) {
           throw new TRPCError({
             code: "NOT_FOUND",
+
             message: "Colaborador não encontrado.",
           });
         }
