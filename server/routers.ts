@@ -261,32 +261,6 @@ async function requireDevice(
 }
 
 /* =========================================================
-   DEVICE TYPE
-   ========================================================= */
-
-async function isFeederDevice(device: {
-  id: number;
-  type?: string | null;
-  deviceId: string;
-}) {
-  const remote = await firebaseRead<{
-    type?: string;
-    deviceId?: string;
-  }>(firebaseDevicePath(device.id));
-
-  const localType = String(device.type ?? "").toLowerCase();
-  const remoteType = String(remote?.type ?? "").toLowerCase();
-  const deviceId = String(device.deviceId ?? "").toLowerCase();
-
-  return (
-    localType === "feeder" ||
-    remoteType === "feeder" ||
-    remoteType === "comedouro" ||
-    deviceId.includes("comedouro")
-  );
-}
-
-/* =========================================================
    ROUTER
    ========================================================= */
 
@@ -788,9 +762,7 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         const access = await requireDevice(ctx.user, input.deviceId);
 
-        const feeder = await isFeederDevice(access.device);
-
-        if (!feeder) {
+        if (access.device.type !== "feeder") {
           throw new TRPCError({
             code: "BAD_REQUEST",
             message: "Este dispositivo não é um comedouro.",
@@ -852,17 +824,8 @@ export const appRouter = router({
           });
         }
 
-        const feeder = await isFeederDevice(access.device);
-
-        if (!feeder) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "A programação só pode ser criada para o comedouro.",
-          });
-        }
-
         const schedule = await db.createSchedule({
-          deviceId: access.device.id,
+          deviceId: input.deviceId,
 
           hour: input.hour,
 
@@ -873,7 +836,7 @@ export const appRouter = router({
           active: true,
         });
 
-        const rows = await db.getDeviceSchedules(access.device.id);
+        const rows = await db.getDeviceSchedules(input.deviceId);
 
         const firebaseSchedules = Object.fromEntries(
           rows.map((s) => [
@@ -890,21 +853,12 @@ export const appRouter = router({
           ]),
         );
 
-        const sync = await firebasePatch(firebaseDevicePath(access.device.id), {
+        await firebasePatch(firebaseDevicePath(access.device.id), {
           schedules: firebaseSchedules,
         });
 
-        if (!sync.synced) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message:
-              "O agendamento foi salvo, mas não foi sincronizado com o Firebase.",
-          });
-        }
-
         return {
           id: schedule.id,
-          synced: true,
         };
       }),
 
@@ -949,15 +903,6 @@ export const appRouter = router({
         }
 
         const access = await requireDevice(ctx.user, found.deviceId);
-
-        const feeder = await isFeederDevice(access.device);
-
-        if (!feeder) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "A programação só pode ser alterada no comedouro.",
-          });
-        }
 
         if (!access.canManage) {
           throw new TRPCError({
@@ -1033,15 +978,6 @@ export const appRouter = router({
 
         const access = await requireDevice(ctx.user, found.deviceId);
 
-        const feeder = await isFeederDevice(access.device);
-
-        if (!feeder) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "A programação só pode ser excluída no comedouro.",
-          });
-        }
-
         if (!access.canManage) {
           throw new TRPCError({
             code: "FORBIDDEN",
@@ -1098,12 +1034,10 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         const access = await requireDevice(ctx.user, input.deviceId);
 
-        const feeder = await isFeederDevice(access.device);
-
-        if (!feeder) {
+        if (access.device.type !== "feeder") {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: "Colaboradores só podem ser adicionados ao comedouro.",
+            message: "Agendamentos só podem ser criados para o comedouro.",
           });
         }
 
