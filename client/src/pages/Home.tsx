@@ -73,17 +73,14 @@ const esp32Code = `#include <WiFi.h>
 // ============================================================
 
 #define FIREBASE_URL    "https://comedouro-a8211-default-rtdb.firebaseio.com"
-#define FIREBASE_SECRET "..."
+#define FIREBASE_SECRET "6hJNKGBnBFz6d6NHT43eXA5RwijgBc8IrIX5g3il"
 
 // ============================================================
 // ID DO DISPOSITIVO
 // ============================================================
 
-// ID numérico cadastrado no site/Firebase
-#define FIREBASE_DEVICE_ID "..."
-
-// ID físico do ESP32
-#define DEVICE_ID "...."
+#define FIREBASE_DEVICE_ID "4"
+#define DEVICE_ID "comedouro_001"
 
 // ============================================================
 // RELÉ
@@ -91,11 +88,11 @@ const esp32Code = `#include <WiFi.h>
 
 #define FEED_PIN 32
 
-// true  = relé ativa com LOW
+// true = relé ativa com LOW
 // false = relé ativa com HIGH
 #define RELAY_ACTIVE_LOW true
 
-// Tempo do motor ligado para liberar UMA porção
+// Tempo do motor ligado para UMA porção
 #define FEED_TIME_MS 1000
 
 // Intervalo entre porções
@@ -107,7 +104,10 @@ const esp32Code = `#include <WiFi.h>
 
 #define HEARTBEAT_INTERVAL 10000
 #define COMMAND_INTERVAL   2000
-#define SCHEDULE_INTERVAL  10000
+#define SCHEDULE_INTERVAL  3000
+
+// Timeout das requisições Firebase
+#define FIREBASE_TIMEOUT 3000
 
 // ============================================================
 // VARIÁVEIS
@@ -123,11 +123,10 @@ String lastScheduleExecution = "";
 WiFiClientSecure client;
 
 // ============================================================
-// URL BASE DO DISPOSITIVO
+// CAMINHO DO DISPOSITIVO
 // ============================================================
 
 String devicePath() {
-
   return String(FIREBASE_URL) +
          "/devices/" +
          FIREBASE_DEVICE_ID;
@@ -141,8 +140,7 @@ void relayOn() {
 
   if (RELAY_ACTIVE_LOW) {
     digitalWrite(FEED_PIN, LOW);
-  }
-  else {
+  } else {
     digitalWrite(FEED_PIN, HIGH);
   }
 
@@ -157,8 +155,7 @@ void relayOff() {
 
   if (RELAY_ACTIVE_LOW) {
     digitalWrite(FEED_PIN, HIGH);
-  }
-  else {
+  } else {
     digitalWrite(FEED_PIN, LOW);
   }
 
@@ -185,6 +182,7 @@ bool firebasePut(String path, String json) {
   Serial.println(json);
 
   http.begin(client, url);
+  http.setTimeout(FIREBASE_TIMEOUT);
 
   http.addHeader(
     "Content-Type",
@@ -227,6 +225,7 @@ String firebaseGet(String path) {
   Serial.println(url);
 
   http.begin(client, url);
+  http.setTimeout(FIREBASE_TIMEOUT);
 
   int httpCode = http.GET();
 
@@ -268,8 +267,10 @@ bool firebaseDelete(String path) {
   Serial.println(url);
 
   http.begin(client, url);
+  http.setTimeout(FIREBASE_TIMEOUT);
 
-  int httpCode = http.sendRequest("DELETE");
+  int httpCode =
+    http.sendRequest("DELETE");
 
   Serial.print("HTTP: ");
   Serial.println(httpCode);
@@ -332,6 +333,7 @@ void sendHeartbeat() {
   Serial.println(json);
 
   http.begin(client, url);
+  http.setTimeout(FIREBASE_TIMEOUT);
 
   http.addHeader(
     "Content-Type",
@@ -361,8 +363,7 @@ void sendHeartbeat() {
       "[Heartbeat] Firebase atualizado."
     );
 
-  }
-  else {
+  } else {
 
     Serial.println(
       "[Heartbeat] ERRO no Firebase."
@@ -371,7 +372,7 @@ void sendHeartbeat() {
 }
 
 // ============================================================
-// REGISTRA ÚLTIMA ALIMENTAÇÃO
+// REGISTRA ALIMENTAÇÃO
 // ============================================================
 
 void registerFeeding(
@@ -388,16 +389,6 @@ void registerFeeding(
   // ==========================================================
   // ÚLTIMA ALIMENTAÇÃO
   // ==========================================================
-  //
-  // IMPORTANTE:
-  // O site espera que lastFeeding seja um timestamp numérico.
-  //
-  // Antes estava sendo salvo um objeto JSON.
-  // Agora será:
-  //
-  // lastFeeding: 1790900825000
-  //
-  // ==========================================================
 
   bool lastFeedingOK =
     firebasePut(
@@ -411,8 +402,7 @@ void registerFeeding(
       "[Feeding] lastFeeding salvo com sucesso."
     );
 
-  }
-  else {
+  } else {
 
     Serial.println(
       "[Feeding] ERRO ao salvar lastFeeding."
@@ -470,8 +460,7 @@ void registerFeeding(
       "[Feeding] Histórico salvo com sucesso."
     );
 
-  }
-  else {
+  } else {
 
     Serial.println(
       "[Feeding] ERRO ao salvar histórico."
@@ -512,7 +501,6 @@ void feedFish(
   String commandId
 ) {
 
-  // Garante pelo menos 1 porção
   if (quantity < 1) {
     quantity = 1;
   }
@@ -544,20 +532,16 @@ void feedFish(
     Serial.print(quantity);
     Serial.println("]");
 
-    // Liga motor
     relayOn();
 
-    // Tempo para liberar uma porção
     delay(FEED_TIME_MS);
 
-    // Desliga motor
     relayOff();
 
     Serial.print("[Porção ");
     Serial.print(i);
     Serial.println("] liberada.");
 
-    // Intervalo entre porções
     if (i < quantity) {
 
       Serial.print("Aguardando ");
@@ -573,7 +557,6 @@ void feedFish(
     "Todas as porções foram liberadas."
   );
 
-  // Registra alimentação
   registerFeeding(
     type,
     quantity,
@@ -586,7 +569,7 @@ void feedFish(
 }
 
 // ============================================================
-// VERIFICA COMANDO DO SITE
+// VERIFICA COMANDO MANUAL DO SITE
 // ============================================================
 
 void checkCommand() {
@@ -602,7 +585,6 @@ void checkCommand() {
     response.length() == 0 ||
     response == "null"
   ) {
-
     return;
   }
 
@@ -652,7 +634,10 @@ void checkCommand() {
     return;
   }
 
-  // Evita executar novamente
+  // ==========================================================
+  // EVITA EXECUTAR O MESMO COMANDO
+  // ==========================================================
+
   if (commandId == lastCommandId) {
 
     Serial.println(
@@ -669,17 +654,26 @@ void checkCommand() {
     "[Command] NOVO COMANDO RECEBIDO!"
   );
 
-  // Executa alimentação
+  // ==========================================================
+  // EXECUTA
+  // ==========================================================
+
   feedFish(
     type,
     quantity,
     commandId
   );
 
-  // Guarda comando
+  // ==========================================================
+  // GUARDA ID
+  // ==========================================================
+
   lastCommandId = commandId;
 
-  // Remove comando
+  // ==========================================================
+  // REMOVE COMANDO DO FIREBASE
+  // ==========================================================
+
   firebaseDelete("/command");
 
   Serial.println(
@@ -728,7 +722,6 @@ void checkSchedules() {
     response.length() == 0 ||
     response == "null"
   ) {
-
     return;
   }
 
@@ -777,8 +770,15 @@ void checkSchedules() {
     return;
   }
 
-  Serial.print("[Schedule] Horário atual: ");
+  Serial.print(
+    "[Schedule] Horário atual: "
+  );
+
   Serial.println(today);
+
+  // ==========================================================
+  // PERCORRE OS AGENDAMENTOS
+  // ==========================================================
 
   for (
     JsonPair item : doc.as<JsonObject>()
@@ -815,6 +815,10 @@ void checkSchedules() {
       continue;
     }
 
+    // ========================================================
+    // VERIFICA HORÁRIO
+    // ========================================================
+
     if (
       hour != currentHour ||
       minute != currentMinute
@@ -822,8 +826,10 @@ void checkSchedules() {
       continue;
     }
 
-    // Uma execução por agendamento
-    // no mesmo minuto
+    // ========================================================
+    // EVITA REPETIR NO MESMO MINUTO
+    // ========================================================
+
     String executionKey =
       String(scheduleId) +
       "|" +
@@ -839,11 +845,19 @@ void checkSchedules() {
     lastScheduleExecution =
       executionKey;
 
+    // ========================================================
+    // ID DO COMANDO
+    // ========================================================
+
     String commandId =
       "schedule-" +
       String(scheduleId) +
       "-" +
       String(time(nullptr));
+
+    // ========================================================
+    // LOG
+    // ========================================================
 
     Serial.println();
     Serial.println(
@@ -859,12 +873,18 @@ void checkSchedules() {
 
     Serial.print("Horário: ");
 
-    if (hour < 10) Serial.print("0");
+    if (hour < 10) {
+      Serial.print("0");
+    }
+
     Serial.print(hour);
 
     Serial.print(":");
 
-    if (minute < 10) Serial.print("0");
+    if (minute < 10) {
+      Serial.print("0");
+    }
+
     Serial.println(minute);
 
     Serial.print("Quantidade: ");
@@ -874,14 +894,20 @@ void checkSchedules() {
       "=============================="
     );
 
+    // ========================================================
+    // EXECUTA ALIMENTAÇÃO AUTOMÁTICA
+    // ========================================================
+
     feedFish(
       "automatic",
       quantity,
       commandId
     );
 
-    // Não executa outro agendamento
-    // no mesmo ciclo
+    // ========================================================
+    // UM AGENDAMENTO POR CICLO
+    // ========================================================
+
     break;
   }
 }
@@ -908,11 +934,16 @@ void connectWiFi() {
   );
 
   bool conectado =
-    wm.autoConnect("Comedouro-Setup");
+    wm.autoConnect("wifi-Comedouro");
+
+  // ==========================================================
+  // FALHOU
+  // ==========================================================
 
   if (!conectado) {
 
     Serial.println();
+
     Serial.println(
       "Não foi possível conectar."
     );
@@ -925,98 +956,35 @@ void connectWiFi() {
 
     ESP.restart();
 
+    return;
   }
-  else {
 
-    Serial.println();
-    Serial.println(
-      "=============================="
-    );
+  // ==========================================================
+  // CONECTADO
+  // ==========================================================
 
-    Serial.println(
-      "      WI-FI CONECTADO!"
-    );
+  Serial.println();
 
-    Serial.println(
-      "=============================="
-    );
+  Serial.println("==============================");
+  Serial.println("      WI-FI CONECTADO!");
+  Serial.println("==============================");
 
-    Serial.print(
-      "IP: "
-    );
+  Serial.print("IP: ");
+  Serial.println(
+    WiFi.localIP()
+  );
 
-    Serial.println(
-      WiFi.localIP()
-    );
-
-    Serial.print(
-      "RSSI: "
-    );
-
-    Serial.println(
-      WiFi.RSSI()
-    );
-  }
+  Serial.print("RSSI: ");
+  Serial.println(
+    WiFi.RSSI()
+  );
 }
 
 // ============================================================
-// SETUP
+// CONFIGURAÇÃO DO HORÁRIO
 // ============================================================
 
-void setup() {
-
-  Serial.begin(115200);
-
-  delay(1000);
-
-  Serial.println();
-  Serial.println(
-    "================================="
-  );
-
-  Serial.println(
-    "        COMEDOURO ESP32"
-  );
-
-  Serial.println(
-    "================================="
-  );
-
-  Serial.print(
-    "Device ID: "
-  );
-
-  Serial.println(
-    DEVICE_ID
-  );
-
-  // ==========================================================
-  // RELÉ
-  // ==========================================================
-
-  pinMode(
-    FEED_PIN,
-    OUTPUT
-  );
-
-  // Motor desligado
-  relayOff();
-
-  // ==========================================================
-  // HTTPS
-  // ==========================================================
-
-  client.setInsecure();
-
-  // ==========================================================
-  // WI-FI
-  // ==========================================================
-
-  connectWiFi();
-
-  // ==========================================================
-  // HORÁRIO
-  // ==========================================================
+void setupTime() {
 
   configTime(
     -3 * 3600,
@@ -1043,7 +1011,8 @@ void setup() {
 
     Serial.print(".");
 
-    now = time(nullptr);
+    now =
+      time(nullptr);
 
     attempts++;
   }
@@ -1056,16 +1025,90 @@ void setup() {
       "Horário sincronizado."
     );
 
-  }
-  else {
+    struct tm timeinfo;
+
+    if (
+      getLocalTime(
+        &timeinfo,
+        1000
+      )
+    ) {
+
+      Serial.print(
+        "Hora atual: "
+      );
+
+      Serial.printf(
+        "%02d:%02d:%02d\n",
+        timeinfo.tm_hour,
+        timeinfo.tm_min,
+        timeinfo.tm_sec
+      );
+    }
+
+  } else {
 
     Serial.println(
       "Não foi possível sincronizar horário."
     );
   }
+}
+
+// ============================================================
+// SETUP
+// ============================================================
+
+void setup() {
+
+  Serial.begin(115200);
+
+  delay(1000);
+
+  Serial.println();
+  Serial.println("=================================");
+  Serial.println("        COMEDOURO ESP32");
+  Serial.println("=================================");
+
+  Serial.print(
+    "Device ID: "
+  );
+
+  Serial.println(
+    DEVICE_ID
+  );
 
   // ==========================================================
-  // HEARTBEAT INICIAL
+  // RELÉ
+  // ==========================================================
+
+  pinMode(
+    FEED_PIN,
+    OUTPUT
+  );
+
+  // Garante relé desligado
+  relayOff();
+
+  // ==========================================================
+  // HTTPS
+  // ==========================================================
+
+  client.setInsecure();
+
+  // ==========================================================
+  // WI-FI
+  // ==========================================================
+
+  connectWiFi();
+
+  // ==========================================================
+  // HORÁRIO
+  // ==========================================================
+
+  setupTime();
+
+  // ==========================================================
+  // PRIMEIRO HEARTBEAT
   // ==========================================================
 
   if (
@@ -1075,6 +1118,11 @@ void setup() {
 
     sendHeartbeat();
   }
+
+  Serial.println();
+  Serial.println("=================================");
+  Serial.println("      SISTEMA PRONTO");
+  Serial.println("=================================");
 }
 
 // ============================================================
@@ -1096,7 +1144,6 @@ void loop() {
       "[Wi-Fi] Conexão perdida."
     );
 
-    // Segurança
     relayOff();
 
     connectWiFi();
@@ -1118,7 +1165,8 @@ void loop() {
     HEARTBEAT_INTERVAL
   ) {
 
-    lastHeartbeat = now;
+    lastHeartbeat =
+      now;
 
     sendHeartbeat();
   }
@@ -1132,13 +1180,14 @@ void loop() {
     SCHEDULE_INTERVAL
   ) {
 
-    lastScheduleCheck = now;
+    lastScheduleCheck =
+      now;
 
     checkSchedules();
   }
 
   // ==========================================================
-  // COMANDOS MANUAIS
+  // COMANDO MANUAL
   // ==========================================================
 
   if (
@@ -1146,10 +1195,15 @@ void loop() {
     COMMAND_INTERVAL
   ) {
 
-    lastCommandCheck = now;
+    lastCommandCheck =
+      now;
 
     checkCommand();
   }
+
+  // ==========================================================
+  // PEQUENA PAUSA
+  // ==========================================================
 
   delay(50);
 }`;
@@ -3396,7 +3450,7 @@ function AboutPage() {
 
       <div className="about-grid">
         <section className="about-hero panel">
-          <div className="logo-place">
+          <div className="logo-place lica-logo">
             <img src="/logo-lica.png" alt="Logo do LICA" />
           </div>
 
