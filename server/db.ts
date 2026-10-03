@@ -370,25 +370,30 @@ export async function createDevice(input: {
   ownerId: number;
   name: string;
   deviceKey: string;
+  type: "feeder" | "water-monitor";
 }) {
   const devices = await getCollection<any>("devices");
+
   const id = Number(nextId(devices));
+
   const record = {
     id,
     deviceId: input.deviceId,
     ownerId: input.ownerId,
     name: input.name,
     deviceKey: input.deviceKey,
+    type: input.type,
     status: "offline",
     wifi: null,
     lastSeen: null,
     lastFeeding: null,
     createdAt: now().toISOString(),
   };
+
   await putCollectionItem("devices", id, record);
+
   return normalizeDevice(record);
 }
-
 export async function updateDevice(id: number, patch: Partial<Device>) {
   const current = await getDeviceById(id);
 

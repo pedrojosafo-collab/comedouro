@@ -643,8 +643,9 @@ export const appRouter = router({
           name: input.name,
 
           deviceKey: randomUUID(),
-        });
 
+          type: input.type,
+        });
         console.log("[DEVICE] Retorno createDevice:", device);
 
         if (!device || !device.id) {
