@@ -261,6 +261,32 @@ async function requireDevice(
 }
 
 /* =========================================================
+   DEVICE TYPE
+   ========================================================= */
+
+async function isFeederDevice(device: {
+  id: number;
+  type?: string | null;
+  deviceId: string;
+}) {
+  const remote = await firebaseRead<{
+    type?: string;
+    deviceId?: string;
+  }>(firebaseDevicePath(device.id));
+
+  const localType = String(device.type ?? "").toLowerCase();
+  const remoteType = String(remote?.type ?? "").toLowerCase();
+  const deviceId = String(device.deviceId ?? "").toLowerCase();
+
+  return (
+    localType === "feeder" ||
+    remoteType === "feeder" ||
+    remoteType === "comedouro" ||
+    deviceId.includes("comedouro")
+  );
+}
+
+/* =========================================================
    ROUTER
    ========================================================= */
 
@@ -393,13 +419,13 @@ export const appRouter = router({
         // Isso evita que o heartbeat do segundo ESP32 faça o site confundir
         // o monitor de água com o comedouro.
         const feeder =
+          devicesWithFirebase.find((item) => item.local.type === "feeder") ??
           devicesWithFirebase.find(
             (item) =>
               item.remote?.type === "feeder" ||
               item.remote?.type === "comedouro" ||
-              item.local.type === "feeder" ||
               item.local.deviceId.toLowerCase().includes("comedouro"),
-          ) ?? null;
+          );
 
         /* =================================================
              IDENTIFICAR MONITOR DE ÁGUA
@@ -762,18 +788,9 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         const access = await requireDevice(ctx.user, input.deviceId);
 
-        const firebaseDevice = await firebaseRead<{
-          type?: string;
-          deviceId?: string;
-        }>(firebaseDevicePath(access.device.id));
+        const feeder = await isFeederDevice(access.device);
 
-        const isFeeder =
-          access.device.type === "feeder" ||
-          firebaseDevice?.type === "feeder" ||
-          firebaseDevice?.type === "comedouro" ||
-          access.device.deviceId.toLowerCase().includes("comedouro");
-
-        if (!isFeeder) {
+        if (!feeder) {
           throw new TRPCError({
             code: "BAD_REQUEST",
             message: "Este dispositivo não é um comedouro.",
@@ -835,8 +852,17 @@ export const appRouter = router({
           });
         }
 
+        const feeder = await isFeederDevice(access.device);
+
+        if (!feeder) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "A programação só pode ser criada para o comedouro.",
+          });
+        }
+
         const schedule = await db.createSchedule({
-          deviceId: input.deviceId,
+          deviceId: access.device.id,
 
           hour: input.hour,
 
@@ -847,7 +873,7 @@ export const appRouter = router({
           active: true,
         });
 
-        const rows = await db.getDeviceSchedules(input.deviceId);
+        const rows = await db.getDeviceSchedules(access.device.id);
 
         const firebaseSchedules = Object.fromEntries(
           rows.map((s) => [
@@ -864,12 +890,21 @@ export const appRouter = router({
           ]),
         );
 
-        await firebasePatch(firebaseDevicePath(access.device.id), {
+        const sync = await firebasePatch(firebaseDevicePath(access.device.id), {
           schedules: firebaseSchedules,
         });
 
+        if (!sync.synced) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message:
+              "O agendamento foi salvo, mas não foi sincronizado com o Firebase.",
+          });
+        }
+
         return {
           id: schedule.id,
+          synced: true,
         };
       }),
 
@@ -914,6 +949,15 @@ export const appRouter = router({
         }
 
         const access = await requireDevice(ctx.user, found.deviceId);
+
+        const feeder = await isFeederDevice(access.device);
+
+        if (!feeder) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "A programação só pode ser alterada no comedouro.",
+          });
+        }
 
         if (!access.canManage) {
           throw new TRPCError({
@@ -989,6 +1033,15 @@ export const appRouter = router({
 
         const access = await requireDevice(ctx.user, found.deviceId);
 
+        const feeder = await isFeederDevice(access.device);
+
+        if (!feeder) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "A programação só pode ser excluída no comedouro.",
+          });
+        }
+
         if (!access.canManage) {
           throw new TRPCError({
             code: "FORBIDDEN",
@@ -1045,10 +1098,12 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         const access = await requireDevice(ctx.user, input.deviceId);
 
-        if (access.device.type !== "feeder") {
+        const feeder = await isFeederDevice(access.device);
+
+        if (!feeder) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: "Agendamentos só podem ser criados para o comedouro.",
+            message: "Colaboradores só podem ser adicionados ao comedouro.",
           });
         }
 
