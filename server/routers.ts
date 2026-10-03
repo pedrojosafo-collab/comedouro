@@ -975,7 +975,7 @@ export const appRouter = router({
 
         if (!access.canManage) {
           throw new TRPCError({
-            code: "SEM PERMISSÇÃO",
+            code: "FORBIDDEN",
           });
         }
 
