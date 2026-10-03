@@ -389,34 +389,26 @@ export const appRouter = router({
              IDENTIFICAR COMEDOURO
              ================================================= */
 
-        // IMPORTANTE: o tipo cadastrado no banco local é a fonte principal.
-        // Isso evita que o heartbeat do segundo ESP32 faça o site confundir
-        // o monitor de água com o comedouro.
         const feeder =
-          devicesWithFirebase.find((item) => item.local.type === "feeder") ??
           devicesWithFirebase.find(
             (item) =>
               item.remote?.type === "feeder" ||
               item.remote?.type === "comedouro" ||
-              item.local.deviceId.toLowerCase().includes("comedouro"),
-          );
+              item.local.deviceId.includes("comedouro"),
+          ) ?? devicesWithFirebase[0];
 
         /* =================================================
              IDENTIFICAR MONITOR DE ÁGUA
              ================================================= */
 
-        const waterDevice =
-          devicesWithFirebase.find(
-            (item) => item.local.type === "water-monitor",
-          ) ??
-          devicesWithFirebase.find(
-            (item) =>
-              item.remote?.type === "water-monitor" ||
-              item.local.deviceId.toLowerCase().includes("agua") ||
-              item.local.deviceId.toLowerCase().includes("water") ||
-              item.local.name.toLowerCase().includes("água") ||
-              item.local.name.toLowerCase().includes("agua"),
-          );
+        const waterDevice = devicesWithFirebase.find(
+          (item) =>
+            item.remote?.type === "water-monitor" ||
+            item.local.deviceId.includes("agua") ||
+            item.local.deviceId.includes("water") ||
+            item.local.name.toLowerCase().includes("água") ||
+            item.local.name.toLowerCase().includes("agua"),
+        );
 
         /* =================================================
              DADOS DO COMEDOURO
@@ -576,7 +568,7 @@ export const appRouter = router({
 
             lastSeen: item.lastSeen,
 
-            type: item.local.type ?? item.remote?.type ?? "feeder",
+            type: item.remote?.type ?? "feeder",
           })),
 
           waterDevice: waterDevice?.local
@@ -761,13 +753,6 @@ export const appRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         const access = await requireDevice(ctx.user, input.deviceId);
-
-        if (access.device.type !== "feeder") {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "Este dispositivo não é um comedouro.",
-          });
-        }
 
         const now = Date.now();
 
@@ -1033,13 +1018,6 @@ export const appRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         const access = await requireDevice(ctx.user, input.deviceId);
-
-        if (access.device.type !== "feeder") {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "Agendamentos só podem ser criados para o comedouro.",
-          });
-        }
 
         if (!access.canManage) {
           throw new TRPCError({
