@@ -756,14 +756,18 @@ export const appRouter = router({
       .input(
         z.object({
           deviceId: z.number(),
-
           quantity: z.number().int().min(1).max(10).default(1),
         }),
       )
       .mutation(async ({ ctx, input }) => {
         const access = await requireDevice(ctx.user, input.deviceId);
 
-        if (access.device.type !== "feeder") {
+        const isFeeder =
+          access.device.type === "feeder" ||
+          access.device.type === "comedouro" ||
+          access.device.deviceId.toLowerCase().includes("comedouro");
+
+        if (!isFeeder) {
           throw new TRPCError({
             code: "BAD_REQUEST",
             message: "Este dispositivo não é um comedouro.",
@@ -771,22 +775,22 @@ export const appRouter = router({
         }
 
         const now = Date.now();
-
         const requestId = randomUUID();
 
         const command = {
           requestId,
-
           feed: true,
-
           type: "manual",
-
           quantity: input.quantity,
-
           requestedAt: now,
-
           requestedBy: ctx.user.email ?? ctx.user.name ?? "usuário",
         };
+
+        console.log("[FEED] Dispositivo:", {
+          id: access.device.id,
+          deviceId: access.device.deviceId,
+          type: access.device.type,
+        });
 
         console.log("[FEED] Enviando comando:", command);
 
@@ -798,7 +802,6 @@ export const appRouter = router({
         if (!sync.synced) {
           throw new TRPCError({
             code: "INTERNAL_SERVER_ERROR",
-
             message: "Não foi possível enviar o comando para o Firebase.",
           });
         }
