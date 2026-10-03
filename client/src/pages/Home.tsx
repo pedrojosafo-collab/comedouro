@@ -3490,29 +3490,30 @@ function AboutPage() {
 
           <div className="about-fields">
             <Detail
-              value="Instituição"
-              label="   Instituto Federal de Educação, Ciência e Tecnologia Baiano – Campus Senhor do Bonfim"
+              label="Instituição"
+              value="  Instituto Federal de Educação, Ciência e Tecnologia Baiano – Campus Senhor do Bonfim"
             />
 
             <Detail
               label="Cursos"
-              value="  Licenciatura em Ciências Agrárias e Técnico em Agropecuária. "
+              value="  Licenciatura em Ciências Agrárias e Técnico em Agropecuária"
             />
 
             <Detail
               label="Projeto"
-              value="   COMEDOURO – Sistema Automatizado de Alimentação"
+              value="  COMEDOURO – Sistema Automatizado de Alimentação"
             />
 
             <Detail
-              label="  PROFESSORES ORIENTADORES"
-              value=" Claudia Kiya, Jaciara Silva, Juracir Santos e Thales Mendes"
+              label="PROFESSORES ORIENTADORES"
+              value="  Claudia Kiya, Jaciara Silva, Juracir Santos e Thales Mendes"
             />
 
             <Detail
-              label=" ALUNOS ORIENTADORES"
+              label="ALUNOS ORIENTADORES"
               value="  Mirella Anjos e Pedro Josafá"
             />
+
             <Detail label="ALUNOS" value="  Davi Santos e Pedro Júnior" />
           </div>
         </section>
