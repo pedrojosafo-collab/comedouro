@@ -3095,15 +3095,25 @@ function WaterMonitoringPage({
                 >
                   <strong>Condutividade</strong>
                   {parameterStatus(
-                    !hasConductivity ? "unknown" : "warning",
+                    !hasConductivity
+                      ? "unknown"
+                      : conductivity > 2000
+                        ? "danger"
+                        : conductivity < 100
+                          ? "warning"
+                          : "normal",
                     !hasConductivity
                       ? "Sem leitura válida"
-                      : "Acompanhar a tendência",
+                      : conductivity > 2000
+                        ? "Acima de 2.000 µS/cm"
+                        : conductivity < 100
+                          ? "Abaixo de 100 µS/cm"
+                          : "Dentro da referência",
                   )}
                 </div>
                 <p style={{ margin: "8px 0 0", fontSize: 13 }}>
-                  Não há um único limite ideal para todos os cultivos; depende
-                  dos sais dissolvidos e da água utilizada.
+                  Referência: 100–2.000 µS/cm. Faixa inicial de acompanhamento;
+                  depende dos sais dissolvidos e das condições da água.
                 </p>
               </div>
 
@@ -3127,19 +3137,18 @@ function WaterMonitoringPage({
                   {parameterStatus(
                     !hasTurbidity
                       ? "unknown"
-                      : turbidity > 30
-                        ? "warning"
+                      : turbidity > 200
+                        ? "danger"
                         : "normal",
                     !hasTurbidity
                       ? "Sem leitura válida"
-                      : turbidity > 30
-                        ? "Acima de 30 NTU"
-                        : "Até 30 NTU",
+                      : turbidity > 200
+                        ? "Acima de 200 NTU"
+                        : "Até 200 NTU",
                   )}
                 </div>
                 <p style={{ margin: "8px 0 0", fontSize: 13 }}>
-                  Referência inicial: até 30 NTU. O valor adequado varia
-                  conforme o sistema de criação.
+                  Referência: até 200 NTU (ideal aproximado: abaixo de 100 NTU).
                 </p>
               </div>
             </div>
