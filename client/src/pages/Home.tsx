@@ -73,14 +73,14 @@ const esp32Code = `#include <WiFi.h>
 // ============================================================
 
 #define FIREBASE_URL    "https://comedouro-a8211-default-rtdb.firebaseio.com"
-#define FIREBASE_SECRET "6hJNKGBnBFz6d6NHT43eXA5RwijgBc8IrIX5g3il"
+#define FIREBASE_SECRET "..."
 
 // ============================================================
 // ID DO DISPOSITIVO
 // ============================================================
 
-#define FIREBASE_DEVICE_ID "4"
-#define DEVICE_ID "comedouro_001"
+#define FIREBASE_DEVICE_ID "..."
+#define DEVICE_ID "..."
 
 // ============================================================
 // RELÉ
@@ -2830,6 +2830,70 @@ function WaterMonitoringPage({
 }) {
   const sensors = data?.waterSensors || {};
   const online = sensors.status === "online";
+
+  // Faixas de referência para acompanhamento da água de tilápias.
+  // Condutividade e turbidez variam conforme a água e o sistema de cultivo;
+  // por isso, a condutividade é exibida para acompanhamento, sem um limite universal.
+  const temperature = Number(sensors.temperature);
+  const hasTemperature =
+    sensors.temperature != null &&
+    Number.isFinite(temperature) &&
+    temperature >= -50 &&
+    temperature <= 100;
+  const ph = Number(sensors.ph);
+  const hasPh =
+    sensors.ph != null && Number.isFinite(ph) && ph >= 0 && ph <= 14;
+  const turbidity = Number(sensors.turbidity);
+  const hasTurbidity =
+    sensors.turbidity != null && Number.isFinite(turbidity) && turbidity >= 0;
+  const conductivity = Number(sensors.conductivity);
+  const hasConductivity =
+    sensors.conductivity != null &&
+    Number.isFinite(conductivity) &&
+    conductivity >= 0;
+
+  const parameterStatus = (
+    status: "normal" | "warning" | "danger" | "unknown",
+    label: string,
+  ) => {
+    const palette = {
+      normal: {
+        color: "#166534",
+        background: "#dcfce7",
+        label: "Dentro da referência",
+      },
+      warning: { color: "#92400e", background: "#fef3c7", label: "Atenção" },
+      danger: {
+        color: "#991b1b",
+        background: "#fee2e2",
+        label: "Fora da referência",
+      },
+      unknown: {
+        color: "#475569",
+        background: "#e2e8f0",
+        label: "Sem leitura válida",
+      },
+    }[status];
+    return (
+      <span
+        title={label}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          borderRadius: 999,
+          padding: "5px 10px",
+          fontSize: 12,
+          fontWeight: 700,
+          color: palette.color,
+          background: palette.background,
+          whiteSpace: "normal",
+        }}
+      >
+        {label || palette.label}
+      </span>
+    );
+  };
+
   return (
     <>
       <PageHeader
@@ -2918,6 +2982,176 @@ function WaterMonitoringPage({
               tone="amber"
             />
           </div>
+
+          <section className="panel" style={{ marginTop: 18 }}>
+            <div className="panel-heading">
+              <div>
+                <span className="section-kicker">REFERÊNCIA PARA TILÁPIAS</span>
+                <h3>Os parâmetros estão dentro da faixa?</h3>
+                <p className="muted" style={{ marginTop: 6 }}>
+                  As indicações são referências de acompanhamento. Confirme
+                  leituras suspeitas e considere as condições do seu cultivo.
+                </p>
+              </div>
+              <Activity size={22} />
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: 12,
+              }}
+            >
+              <div
+                style={{
+                  border: "1px solid var(--border, #e2e8f0)",
+                  borderRadius: 12,
+                  padding: 14,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 8,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <strong>Temperatura</strong>
+                  {parameterStatus(
+                    !hasTemperature
+                      ? "unknown"
+                      : temperature < 24 || temperature > 32
+                        ? "danger"
+                        : "normal",
+                    !hasTemperature
+                      ? "Verifique o sensor"
+                      : temperature < 24
+                        ? "Abaixo de 24 °C"
+                        : temperature > 32
+                          ? "Acima de 32 °C"
+                          : "Dentro da referência",
+                  )}
+                </div>
+                <p style={{ margin: "8px 0 0", fontSize: 13 }}>
+                  Referência: 24–32 °C (ideal aproximado: 27–30 °C).
+                </p>
+              </div>
+
+              <div
+                style={{
+                  border: "1px solid var(--border, #e2e8f0)",
+                  borderRadius: 12,
+                  padding: 14,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 8,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <strong>pH</strong>
+                  {parameterStatus(
+                    !hasPh
+                      ? "unknown"
+                      : ph < 6.5 || ph > 8.5
+                        ? "danger"
+                        : "normal",
+                    !hasPh
+                      ? "Verifique o sensor"
+                      : ph < 6.5
+                        ? "Abaixo de 6,5"
+                        : ph > 8.5
+                          ? "Acima de 8,5"
+                          : "Dentro da referência",
+                  )}
+                </div>
+                <p style={{ margin: "8px 0 0", fontSize: 13 }}>
+                  Referência: 6,5–8,5 (ideal aproximado: 7,0–8,0).
+                </p>
+              </div>
+
+              <div
+                style={{
+                  border: "1px solid var(--border, #e2e8f0)",
+                  borderRadius: 12,
+                  padding: 14,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 8,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <strong>Condutividade</strong>
+                  {parameterStatus(
+                    !hasConductivity ? "unknown" : "warning",
+                    !hasConductivity
+                      ? "Sem leitura válida"
+                      : "Acompanhar a tendência",
+                  )}
+                </div>
+                <p style={{ margin: "8px 0 0", fontSize: 13 }}>
+                  Não há um único limite ideal para todos os cultivos; depende
+                  dos sais dissolvidos e da água utilizada.
+                </p>
+              </div>
+
+              <div
+                style={{
+                  border: "1px solid var(--border, #e2e8f0)",
+                  borderRadius: 12,
+                  padding: 14,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 8,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <strong>Turbidez</strong>
+                  {parameterStatus(
+                    !hasTurbidity
+                      ? "unknown"
+                      : turbidity > 30
+                        ? "warning"
+                        : "normal",
+                    !hasTurbidity
+                      ? "Sem leitura válida"
+                      : turbidity > 30
+                        ? "Acima de 30 NTU"
+                        : "Até 30 NTU",
+                  )}
+                </div>
+                <p style={{ margin: "8px 0 0", fontSize: 13 }}>
+                  Referência inicial: até 30 NTU. O valor adequado varia
+                  conforme o sistema de criação.
+                </p>
+              </div>
+            </div>
+
+            <p className="muted" style={{ fontSize: 12, marginTop: 14 }}>
+              Importante: o estado do ESP32 indica apenas comunicação, não
+              garante que a água esteja adequada. Sensores não calibrados podem
+              gerar alertas incorretos. A condutividade exibida também deve ser
+              confirmada com a unidade real enviada pelo sensor.
+            </p>
+          </section>
+
           <section className="panel">
             <div className="panel-heading">
               <div>
