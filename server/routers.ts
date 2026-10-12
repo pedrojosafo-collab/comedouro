@@ -295,6 +295,42 @@ export const appRouter = router({
      ======================================================= */
 
   app: router({
+    updateProfileName: protectedProcedure
+      .input(
+        z.object({
+          name: z.string().trim().min(2).max(80),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        const openId = ctx.user.openId;
+
+        if (!openId) {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "Não foi possível identificar sua conta.",
+          });
+        }
+
+        const savedUser = await db.getUserByOpenId(openId);
+
+        if (!savedUser) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Conta não encontrada no banco de dados.",
+          });
+        }
+
+        await db.upsertUser({
+          ...savedUser,
+          name: input.name,
+        });
+
+        return {
+          success: true,
+          name: input.name,
+        };
+      }),
+
     /* =====================================================
        OVERVIEW
        ===================================================== */
