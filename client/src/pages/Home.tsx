@@ -3166,7 +3166,52 @@ function AboutPage() {
   );
 }
 
-function SettingsPage({ user }: { user: any }) {
+function SettingsPage({
+  user,
+  onNameUpdated,
+}: {
+  user: any;
+  onNameUpdated: (name: string) => void;
+}) {
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(user?.name || "");
+  const updateName = trpc.app.updateProfileName.useMutation({
+    onSuccess: (result) => {
+      onNameUpdated(result.name);
+      setNameDraft(result.name);
+      setIsEditingName(false);
+      toast.success("Nome atualizado com sucesso.");
+    },
+    onError: (error) =>
+      toast.error(error.message || "Não foi possível atualizar o nome."),
+  });
+
+  useEffect(() => {
+    setNameDraft(user?.name || "");
+  }, [user?.name]);
+
+  const cancelNameEdit = () => {
+    setNameDraft(user?.name || "");
+    setIsEditingName(false);
+  };
+
+  const saveName = () => {
+    const name = nameDraft.trim();
+    if (name.length < 2) {
+      toast.error("O nome precisa ter pelo menos 2 caracteres.");
+      return;
+    }
+    if (name.length > 80) {
+      toast.error("O nome pode ter no máximo 80 caracteres.");
+      return;
+    }
+    if (name === (user?.name || "").trim()) {
+      setIsEditingName(false);
+      return;
+    }
+    updateName.mutate({ name });
+  };
+
   return (
     <>
       <PageHeader
@@ -3180,14 +3225,59 @@ function SettingsPage({ user }: { user: any }) {
             <div className="profile-avatar">
               {(user?.name || "U").slice(0, 1).toUpperCase()}
             </div>
-            <div>
+            <div style={{ flex: 1, minWidth: 0 }}>
               <span className="section-kicker">PERFIL</span>
-              <h3>{user?.name || "Usuário COMEDOURO"}</h3>
+              {isEditingName ? (
+                <div className="field" style={{ marginTop: 8, maxWidth: 360 }}>
+                  <label htmlFor="profile-name">Nome de exibição</label>
+                  <input
+                    id="profile-name"
+                    type="text"
+                    value={nameDraft}
+                    maxLength={80}
+                    autoFocus
+                    onChange={(event) => setNameDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") saveName();
+                      if (event.key === "Escape") cancelNameEdit();
+                    }}
+                    disabled={updateName.isPending}
+                  />
+                </div>
+              ) : (
+                <h3>{user?.name || "Usuário COMEDOURO"}</h3>
+              )}
               <p>{user?.email || "E-mail protegido"}</p>
             </div>
-            <button className="secondary-button">
-              <Pencil size={15} /> Editar nome
-            </button>
+            {isEditingName ? (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={saveName}
+                  disabled={updateName.isPending}
+                >
+                  <Check size={15} />
+                  {updateName.isPending ? "Salvando..." : "Salvar"}
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={cancelNameEdit}
+                  disabled={updateName.isPending}
+                >
+                  Cancelar
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setIsEditingName(true)}
+              >
+                <Pencil size={15} /> Editar nome
+              </button>
+            )}
           </div>
           <div className="setting-row">
             <div>
@@ -3241,6 +3331,18 @@ function SettingsPage({ user }: { user: any }) {
 export default function Home() {
   const { user, loading, isAuthenticated, logout } = useAuth();
   const [location, setLocation] = useLocation();
+  const [profileNameOverride, setProfileNameOverride] = useState<string | null>(
+    null,
+  );
+  const displayUser = useMemo(
+    () => (user ? { ...user, name: profileNameOverride ?? user.name } : user),
+    [user, profileNameOverride],
+  );
+
+  useEffect(() => {
+    setProfileNameOverride(null);
+  }, [user?.id, user?.openId]);
+
   const page = location === "/" ? "/dashboard" : location;
   const overview = trpc.app.overview.useQuery(undefined, {
     enabled: isAuthenticated,
@@ -3280,7 +3382,13 @@ export default function Home() {
     if (page === "/code") return <CodePage />;
     if (page === "/install") return <InstallPage />;
     if (page === "/about") return <AboutPage />;
-    if (page === "/settings") return <SettingsPage user={user} />;
+    if (page === "/settings")
+      return (
+        <SettingsPage
+          user={displayUser}
+          onNameUpdated={setProfileNameOverride}
+        />
+      );
     return (
       <Dashboard
         data={overview.data}
@@ -3288,7 +3396,7 @@ export default function Home() {
         refresh={() => overview.refetch()}
       />
     );
-  }, [page, overview.data, overview.refetch, user, setLocation]);
+  }, [page, overview.data, overview.refetch, displayUser, setLocation]);
   if (loading)
     return (
       <div className="loading-screen">
@@ -3304,7 +3412,7 @@ export default function Home() {
     <AppShell
       page={page}
       setPage={setLocation}
-      user={user}
+      user={displayUser}
       onLogout={() => logout()}
     >
       {overview.isLoading && !overview.data ? (
