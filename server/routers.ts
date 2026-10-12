@@ -393,13 +393,13 @@ export const appRouter = router({
         // Isso evita que o heartbeat do segundo ESP32 faça o site confundir
         // o monitor de água com o comedouro.
         const feeder =
+          devicesWithFirebase.find((item) => item.local.type === "feeder") ??
           devicesWithFirebase.find(
             (item) =>
               item.remote?.type === "feeder" ||
               item.remote?.type === "comedouro" ||
-              item.local.type === "feeder" ||
               item.local.deviceId.toLowerCase().includes("comedouro"),
-          ) ?? null;
+          );
 
         /* =================================================
              IDENTIFICAR MONITOR DE ÁGUA
@@ -643,9 +643,8 @@ export const appRouter = router({
           name: input.name,
 
           deviceKey: randomUUID(),
-
-          type: input.type,
         });
+
         console.log("[DEVICE] Retorno createDevice:", device);
 
         if (!device || !device.id) {
@@ -756,18 +755,14 @@ export const appRouter = router({
       .input(
         z.object({
           deviceId: z.number(),
+
           quantity: z.number().int().min(1).max(10).default(1),
         }),
       )
       .mutation(async ({ ctx, input }) => {
         const access = await requireDevice(ctx.user, input.deviceId);
 
-        const isFeeder =
-          access.device.type === "feeder" ||
-          access.device.type === "comedouro" ||
-          access.device.deviceId.toLowerCase().includes("comedouro");
-
-        if (!isFeeder) {
+        if (access.device.type !== "feeder") {
           throw new TRPCError({
             code: "BAD_REQUEST",
             message: "Este dispositivo não é um comedouro.",
@@ -775,22 +770,22 @@ export const appRouter = router({
         }
 
         const now = Date.now();
+
         const requestId = randomUUID();
 
         const command = {
           requestId,
+
           feed: true,
+
           type: "manual",
+
           quantity: input.quantity,
+
           requestedAt: now,
+
           requestedBy: ctx.user.email ?? ctx.user.name ?? "usuário",
         };
-
-        console.log("[FEED] Dispositivo:", {
-          id: access.device.id,
-          deviceId: access.device.deviceId,
-          type: access.device.type,
-        });
 
         console.log("[FEED] Enviando comando:", command);
 
@@ -802,6 +797,7 @@ export const appRouter = router({
         if (!sync.synced) {
           throw new TRPCError({
             code: "INTERNAL_SERVER_ERROR",
+
             message: "Não foi possível enviar o comando para o Firebase.",
           });
         }
@@ -821,6 +817,19 @@ export const appRouter = router({
       .input(scheduleInput)
       .mutation(async ({ ctx, input }) => {
         const access = await requireDevice(ctx.user, input.deviceId);
+
+        // Agendamentos são permitidos somente para dispositivos do tipo comedouro.
+        const isFeeder =
+          access.device.type === "feeder" ||
+          access.device.type === "comedouro" ||
+          access.device.deviceId.toLowerCase().includes("comedouro");
+
+        if (!isFeeder) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Agendamentos só podem ser criados para o comedouro.",
+          });
+        }
 
         if (!access.canManage) {
           throw new TRPCError({
@@ -1038,23 +1047,18 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         const access = await requireDevice(ctx.user, input.deviceId);
 
-        if (access.device.type !== "feeder") {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "Agendamentos só podem ser criados para o comedouro.",
-          });
-        }
-
+        // Somente o proprietário ou administrador pode gerenciar colaboradores.
         if (!access.canManage) {
           throw new TRPCError({
             code: "FORBIDDEN",
+            message: "Você não tem permissão para gerenciar colaboradores.",
           });
         }
 
         const collaborator = await db.createCollaborator({
           deviceId: input.deviceId,
 
-          email: input.email.toLowerCase(),
+          email: input.email.trim().toLowerCase(),
 
           role: input.role,
         });
