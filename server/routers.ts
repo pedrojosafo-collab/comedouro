@@ -834,6 +834,8 @@ export const appRouter = router({
         if (!access.canManage) {
           throw new TRPCError({
             code: "FORBIDDEN",
+            message:
+              "Você não tem permissão para gerenciar a Programação de alimentação.",
           });
         }
 
