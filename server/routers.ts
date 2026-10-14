@@ -209,6 +209,81 @@ function firebaseDevicePath(deviceId: number): string {
 }
 
 /* =========================================================
+   LIMPEZA DO HISTÓRICO DE MEDIÇÕES DA ÁGUA
+   Mantém somente as últimas 24 horas.
+   ========================================================= */
+
+const waterHistoryCleanupLastRun = new Map<number, number>();
+
+async function cleanupOldWaterMeasurements(deviceId: number) {
+  const now = Date.now();
+  const lastRun = waterHistoryCleanupLastRun.get(deviceId);
+
+  // Evita consultar o histórico repetidamente.
+  if (lastRun && now - lastRun < 60 * 60 * 1000) {
+    return;
+  }
+
+  const path = `${firebaseDevicePath(deviceId)}/waterHistory`;
+
+  const records = await firebaseRead<
+    Record<
+      string,
+      {
+        timestamp?: number | string;
+        temperature?: number | null;
+        conductivity?: number | null;
+        ph?: number | null;
+        turbidity?: number | null;
+      }
+    >
+  >(path);
+
+  // Se a leitura falhar, tenta novamente na próxima consulta.
+  if (!records) {
+    return;
+  }
+
+  const cutoff = now - 24 * 60 * 60 * 1000;
+  const oldKeys: string[] = [];
+
+  for (const [key, item] of Object.entries(records)) {
+    // Aceita timestamp no campo ou na chave do registro.
+    let timestamp = Number(item.timestamp ?? key);
+
+    // Converte segundos para milissegundos, se necessário.
+    if (Number.isFinite(timestamp) && timestamp > 0 && timestamp < 1e12) {
+      timestamp *= 1000;
+    }
+
+    // Registros sem data válida são preservados por segurança.
+    if (Number.isFinite(timestamp) && timestamp > 0 && timestamp < cutoff) {
+      oldKeys.push(key);
+    }
+  }
+
+  if (oldKeys.length > 0) {
+    // O Firebase remove somente os filhos definidos como null.
+    const removals = Object.fromEntries(oldKeys.map((key) => [key, null]));
+
+    const result = await firebasePatch(path, removals);
+
+    if (!result.synced) {
+      console.error(
+        `[WaterHistory] Falha ao remover ${oldKeys.length} medições antigas.`,
+      );
+      return;
+    }
+
+    console.log(
+      `[WaterHistory] ${oldKeys.length} medições antigas removidas do dispositivo ${deviceId}.`,
+    );
+  }
+
+  waterHistoryCleanupLastRun.set(deviceId, now);
+}
+
+/* =========================================================
 
    SCHEMAS
 
@@ -644,6 +719,7 @@ export const appRouter = router({
         }> = [];
 
         if (waterDevice?.local) {
+          await cleanupOldWaterMeasurements(waterDevice.local.id);
           const remoteWaterHistory = await firebaseRead<
             Record<
               string,
