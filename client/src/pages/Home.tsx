@@ -1962,6 +1962,7 @@ function WaterHistoryChart({ history }: { history?: WaterReading[] }) {
   const [metric, setMetric] = useState<
     "ph" | "temperature" | "conductivity" | "turbidity"
   >("ph");
+  const [activePointIndex, setActivePointIndex] = useState<number | null>(null);
   // O histórico vem do Firebase pelo servidor. Assim, não depende de a página
   // estar aberta e continua disponível após fechar o navegador ou desligar o ESP32.
   const readings = useMemo(
@@ -2088,7 +2089,22 @@ function WaterHistoryChart({ history }: { history?: WaterReading[] }) {
           viewBox={`0 0 ${width} ${height}`}
           role="img"
           aria-label={`Gráfico de histórico de ${config.label}`}
-          style={{ width: "100%", minWidth: 300, display: "block" }}
+          style={{
+            width: "100%",
+            minWidth: 300,
+            display: "block",
+            touchAction: "pan-y",
+          }}
+          onPointerLeave={(event) => {
+            if (event.pointerType === "mouse") setActivePointIndex(null);
+          }}
+          onPointerDown={(event) => {
+            if (event.pointerType === "touch") {
+              // Tocar uma região vazia do gráfico fecha o detalhe selecionado.
+              const target = event.target as SVGElement;
+              if (target.tagName !== "circle") setActivePointIndex(null);
+            }
+          }}
         >
           {[0, 1, 2, 3].map((tick) => {
             const y = top + (tick / 3) * plotHeight;
@@ -2128,16 +2144,103 @@ function WaterHistoryChart({ history }: { history?: WaterReading[] }) {
             />
           )}
           {coordinates.map((point, index) => (
-            <circle
-              key={`${point.timestamp}-${index}`}
-              cx={point.x}
-              cy={point.y}
-              r={points.length > 36 ? 2 : 3.5}
-              fill={config.color}
-            >
-              <title>{`${timeLabel(point.timestamp)} — ${formatValue(point.value)}${config.unit}`}</title>
-            </circle>
+            <g key={`${point.timestamp}-${index}`}>
+              {/* Área maior para facilitar a seleção com o dedo no celular. */}
+              <circle
+                cx={point.x}
+                cy={point.y}
+                r={14}
+                fill="transparent"
+                pointerEvents="all"
+                style={{ cursor: "pointer", touchAction: "pan-y" }}
+                onPointerEnter={() => setActivePointIndex(index)}
+                onPointerDown={(event) => {
+                  event.stopPropagation();
+                  setActivePointIndex(index);
+                }}
+              />
+              <circle
+                cx={point.x}
+                cy={point.y}
+                r={
+                  activePointIndex === index
+                    ? 5.5
+                    : points.length > 36
+                      ? 2
+                      : 3.5
+                }
+                fill={config.color}
+                stroke={activePointIndex === index ? "currentColor" : "none"}
+                strokeWidth={activePointIndex === index ? 1.5 : 0}
+                pointerEvents="none"
+              >
+                <title>{`${new Date(point.timestamp).toLocaleString("pt-BR")} — ${config.label}: ${formatValue(point.value)}${config.unit}`}</title>
+              </circle>
+            </g>
           ))}
+          {activePointIndex !== null &&
+            coordinates[activePointIndex] &&
+            (() => {
+              const point = coordinates[activePointIndex];
+              const tooltipWidth = 214;
+              const tooltipHeight = 56;
+              const tooltipX = Math.max(
+                4,
+                Math.min(width - tooltipWidth - 4, point.x - tooltipWidth / 2),
+              );
+              const tooltipY =
+                point.y - tooltipHeight - 12 < 4
+                  ? point.y + 16
+                  : point.y - tooltipHeight - 12;
+              return (
+                <g pointerEvents="none">
+                  <line
+                    x1={point.x}
+                    y1={top}
+                    x2={point.x}
+                    y2={height - bottom}
+                    stroke={config.color}
+                    strokeOpacity="0.55"
+                    strokeDasharray="3 3"
+                  />
+                  <rect
+                    x={tooltipX}
+                    y={tooltipY}
+                    width={tooltipWidth}
+                    height={tooltipHeight}
+                    rx="8"
+                    fill="var(--panel, #ffffff)"
+                    stroke={config.color}
+                    strokeWidth="1.2"
+                  />
+                  <text
+                    x={tooltipX + 10}
+                    y={tooltipY + 19}
+                    fontSize="11"
+                    fill="currentColor"
+                    fontWeight="600"
+                  >
+                    {config.label}: {formatValue(point.value)}
+                    {config.unit}
+                  </text>
+                  <text
+                    x={tooltipX + 10}
+                    y={tooltipY + 38}
+                    fontSize="10.5"
+                    fill="currentColor"
+                  >
+                    {new Date(point.timestamp).toLocaleString("pt-BR", {
+                      day: "2-digit",
+                      month: "2-digit",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit",
+                    })}
+                  </text>
+                </g>
+              );
+            })()}
           {coordinates.length > 0 && (
             <>
               <text
