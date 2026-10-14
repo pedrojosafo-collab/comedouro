@@ -2346,18 +2346,17 @@ function WaterMonitoringPage({
               value={sensors.ph != null ? Number(sensors.ph).toFixed(2) : "--"}
               tone="violet"
             />
-            
-<MetricCard
-  icon={<Droplets />}
-  label="Turbidez"
-  value={
-    sensors.turbidity != null
-      ? `${Number(sensors.turbidity).toFixed(1)}`
-      : "--"
-  }
-  tone="amber"
-/>
 
+            <MetricCard
+              icon={<Droplets />}
+              label="Turbidez"
+              value={
+                sensors.turbidity != null
+                  ? `${Number(sensors.turbidity).toFixed(1)}`
+                  : "--"
+              }
+              tone="amber"
+            />
           </div>
 
           <WaterHistoryChart history={data?.waterHistory} />
@@ -2496,51 +2495,50 @@ function WaterMonitoringPage({
                 </p>
               </div>
 
-             
-<div
-  style={{
-    border: "1px solid var(--border, #e2e8f0)",
-    borderRadius: 12,
-    padding: 14,
-  }}
->
-  <div
-    style={{
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      gap: 8,
-      flexWrap: "wrap",
-    }}
-  >
-    <strong>Turbidez</strong>
+              <div
+                style={{
+                  border: "1px solid var(--border, #e2e8f0)",
+                  borderRadius: 12,
+                  padding: 14,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 8,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <strong>Turbidez</strong>
 
-    {parameterStatus(
-      !hasTurbidity
-        ? "unknown"
-        : turbidity < 600
-          ? "normal"
-          : turbidity <= 700
-            ? "warning"
-            : "danger",
-      !hasTurbidity
-        ? "Sem leitura válida"
-        : turbidity < 600
-          ? "Ideal"
-          : turbidity <= 700
-            ? "Atenção: água turva"
-            : turbidity <= 800
-              ? "Muito ruim"
-              : "Crítico: turbidez muito elevada"
-    )}
-  </div>
+                  {parameterStatus(
+                    !hasTurbidity
+                      ? "unknown"
+                      : turbidity < 600
+                        ? "normal"
+                        : turbidity <= 700
+                          ? "warning"
+                          : "danger",
+                    !hasTurbidity
+                      ? "Sem leitura válida"
+                      : turbidity < 600
+                        ? "Ideal"
+                        : turbidity <= 700
+                          ? "Atenção: água turva"
+                          : turbidity <= 800
+                            ? "Muito ruim"
+                            : "Crítico: turbidez muito elevada",
+                  )}
+                </div>
 
-  <p style={{ margin: "8px 0 0", fontSize: 13 }}>
-    Ideal: abaixo de 600. Atenção: de 600 a 700.
-    Muito ruim: acima de 700. Crítico: acima de 800.
-  </p>
-</div>
-
+                <p style={{ margin: "8px 0 0", fontSize: 13 }}>
+                  Ideal: abaixo de 600. Atenção: de 600 a 700. Muito ruim: acima
+                  de 700. Crítico: acima de 800.
+                </p>
+              </div>
+            </div>
 
             <p className="muted" style={{ fontSize: 12, marginTop: 14 }}>
               Importante: o estado do ESP32 indica apenas comunicação, não
