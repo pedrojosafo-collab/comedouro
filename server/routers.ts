@@ -1,15 +1,23 @@
 import { TRPCError } from "@trpc/server";
+
 import { z } from "zod";
+
 import { randomUUID } from "node:crypto";
 
 import { COOKIE_NAME } from "@shared/const";
+
 import { getSessionCookieOptions } from "./_core/cookies";
+
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+
 import * as db from "./db";
+
 import { systemRouter } from "./_core/systemRouter";
 
 /* =========================================================
+
    FIREBASE
+
    ========================================================= */
 
 const firebaseUrl = (
@@ -24,7 +32,9 @@ function firebaseQuery(): string {
 }
 
 /* =========================================================
+
    FIREBASE PUT
+
    ========================================================= */
 
 async function firebaseWrite(path: string, value: unknown) {
@@ -35,9 +45,11 @@ async function firebaseWrite(path: string, value: unknown) {
 
     const response = await fetch(url, {
       method: "PUT",
+
       headers: {
         "content-type": "application/json",
       },
+
       body: JSON.stringify(value),
     });
 
@@ -51,7 +63,9 @@ async function firebaseWrite(path: string, value: unknown) {
 
     return {
       synced: response.ok,
+
       status: response.status,
+
       body,
     };
   } catch (error) {
@@ -59,14 +73,18 @@ async function firebaseWrite(path: string, value: unknown) {
 
     return {
       synced: false,
+
       status: 0,
+
       body: "",
     };
   }
 }
 
 /* =========================================================
+
    FIREBASE PATCH
+
    ========================================================= */
 
 async function firebasePatch(path: string, value: unknown) {
@@ -77,9 +95,11 @@ async function firebasePatch(path: string, value: unknown) {
 
     const response = await fetch(url, {
       method: "PATCH",
+
       headers: {
         "content-type": "application/json",
       },
+
       body: JSON.stringify(value),
     });
 
@@ -93,7 +113,9 @@ async function firebasePatch(path: string, value: unknown) {
 
     return {
       synced: response.ok,
+
       status: response.status,
+
       body,
     };
   } catch (error) {
@@ -101,23 +123,33 @@ async function firebasePatch(path: string, value: unknown) {
 
     return {
       synced: false,
+
       status: 0,
+
       body: "",
     };
   }
 }
 
 /* =========================================================
+
    FIREBASE GET
+
    ========================================================= */
 
-async function firebaseRead<T>(path: string): Promise<T | undefined> {
+async function firebaseRead<T>(
+  path: string,
+  queryParams = "",
+): Promise<T | undefined> {
   try {
-    const url = `${firebaseUrl}/${path}.json${firebaseQuery()}`;
+    const auth = firebaseQuery();
+    const extraQuery = queryParams ? `${auth ? "&" : "?"}${queryParams}` : "";
+    const url = `${firebaseUrl}/${path}.json${auth}${extraQuery}`;
 
     console.log(`[Firebase GET] Consultando: ${path}`);
 
     const response = await fetch(url);
+
     const body = await response.text().catch(() => "");
 
     console.log(`[Firebase GET] HTTP ${response.status}`);
@@ -141,7 +173,9 @@ async function firebaseRead<T>(path: string): Promise<T | undefined> {
 }
 
 /* =========================================================
+
    FIREBASE DELETE
+
    ========================================================= */
 
 async function firebaseDelete(path: string) {
@@ -165,7 +199,9 @@ async function firebaseDelete(path: string) {
 }
 
 /* =========================================================
+
    FIREBASE DEVICE PATH
+
    ========================================================= */
 
 function firebaseDevicePath(deviceId: number): string {
@@ -173,14 +209,20 @@ function firebaseDevicePath(deviceId: number): string {
 }
 
 /* =========================================================
+
    SCHEMAS
+
    ========================================================= */
 
 export const deviceInput = z.object({
   deviceId: z
+
     .string()
+
     .min(3)
+
     .max(80)
+
     .regex(/^[A-Za-z0-9_-]+$/),
 
   name: z.string().min(2).max(120),
@@ -190,21 +232,29 @@ export const deviceInput = z.object({
 
 export const scheduleInput = z.object({
   deviceId: z.number(),
+
   hour: z.number().int().min(0).max(23),
+
   minute: z.number().int().min(0).max(59),
+
   quantity: z.number().int().min(1).max(10).default(1),
 });
 
 /* =========================================================
+
    DEVICE ACCESS
+
    ========================================================= */
 
 async function requireDevice(
   user: {
     id: number;
+
     email?: string | null;
+
     openId?: string;
   },
+
   deviceId: number,
 ) {
   const device = await db.getDeviceById(deviceId);
@@ -212,6 +262,7 @@ async function requireDevice(
   if (!device) {
     throw new TRPCError({
       code: "NOT_FOUND",
+
       message: "Dispositivo não encontrado.",
     });
   }
@@ -219,6 +270,7 @@ async function requireDevice(
   if (device.ownerId === user.id) {
     return {
       device,
+
       canManage: true,
     };
   }
@@ -236,6 +288,7 @@ async function requireDevice(
   if (!userEmail) {
     throw new TRPCError({
       code: "FORBIDDEN",
+
       message: "Seu usuário não possui um e-mail cadastrado.",
     });
   }
@@ -250,29 +303,37 @@ async function requireDevice(
   if (!shared) {
     throw new TRPCError({
       code: "FORBIDDEN",
+
       message: "Você não tem acesso a este dispositivo.",
     });
   }
 
   return {
     device,
+
     canManage: shared.role === "administrator",
   };
 }
 
 /* =========================================================
+
    ROUTER
+
    ========================================================= */
 
 export const appRouter = router({
   /* =======================================================
+
      SYSTEM
+
      ======================================================= */
 
   system: systemRouter,
 
   /* =======================================================
+
      AUTH
+
      ======================================================= */
 
   auth: router({
@@ -281,6 +342,7 @@ export const appRouter = router({
     logout: publicProcedure.mutation(({ ctx }) => {
       ctx.res.clearCookie(COOKIE_NAME, {
         ...getSessionCookieOptions(ctx.req),
+
         maxAge: -1,
       });
 
@@ -291,22 +353,27 @@ export const appRouter = router({
   }),
 
   /* =======================================================
+
      APP
+
      ======================================================= */
 
   app: router({
     updateProfileName: protectedProcedure
+
       .input(
         z.object({
           name: z.string().trim().min(2).max(80),
         }),
       )
+
       .mutation(async ({ ctx, input }) => {
         const openId = ctx.user.openId;
 
         if (!openId) {
           throw new TRPCError({
             code: "UNAUTHORIZED",
+
             message: "Não foi possível identificar sua conta.",
           });
         }
@@ -316,35 +383,43 @@ export const appRouter = router({
         if (!savedUser) {
           throw new TRPCError({
             code: "NOT_FOUND",
+
             message: "Conta não encontrada no banco de dados.",
           });
         }
 
         await db.upsertUser({
           ...savedUser,
+
           name: input.name,
         });
 
         return {
           success: true,
+
           name: input.name,
         };
       }),
 
     /* =====================================================
+
        OVERVIEW
+
        ===================================================== */
 
     overview: protectedProcedure.query(async ({ ctx }) => {
       try {
         console.log("[OVERVIEW] Usuário:", {
           id: ctx.user.id,
+
           email: ctx.user.email,
+
           openId: ctx.user.openId,
         });
 
         const devices = await db.getDevicesForUser(
           ctx.user.id,
+
           ctx.user.email ?? undefined,
         );
 
@@ -353,23 +428,37 @@ export const appRouter = router({
         if (!devices || devices.length === 0) {
           return {
             device: null,
+
             devices: [],
+
             waterDevice: null,
+
             waterSensors: {
               temperature: null,
+
               conductivity: null,
+
               ph: null,
+
               turbidity: null,
             },
+
+            waterHistory: [],
+
             schedules: [],
+
             feedings: [],
+
             collaborators: [],
+
             firebaseConfigured: Boolean(firebaseUrl),
           };
         }
 
         /* =================================================
+
              LER TODOS OS DISPOSITIVOS
+
              ================================================= */
 
         const devicesWithFirebase = await Promise.all(
@@ -378,21 +467,33 @@ export const appRouter = router({
 
             const remote = await firebaseRead<{
               id?: number;
+
               deviceId?: string;
+
               deviceKey?: string;
+
               name?: string;
+
               type?: string;
+
               ownerId?: number;
+
               ownerUid?: string;
 
               status?: string;
+
               lastSeen?: number | null;
+
               lastFeeding?: number | null;
+
               wifi?: number | null;
 
               temperature?: number | null;
+
               conductivity?: number | null;
+
               ph?: number | null;
+
               turbidity?: number | null;
             }>(firebasePath);
 
@@ -407,27 +508,37 @@ export const appRouter = router({
             if (lastSeen) {
               await db.updateDevice(device.id, {
                 lastSeen,
+
                 wifi: remote?.wifi ?? device.wifi,
+
                 status: online ? "online" : "offline",
               });
             }
 
             return {
               local: device,
+
               remote,
+
               lastSeen,
+
               online,
             };
           }),
         );
 
         /* =================================================
+
              IDENTIFICAR COMEDOURO
+
              ================================================= */
 
         // IMPORTANTE: o tipo cadastrado no banco local é a fonte principal.
+
         // Isso evita que o heartbeat do segundo ESP32 faça o site confundir
+
         // o monitor de água com o comedouro.
+
         const feeder =
           devicesWithFirebase.find((item) => item.local.type === "feeder") ??
           devicesWithFirebase.find(
@@ -438,7 +549,9 @@ export const appRouter = router({
           );
 
         /* =================================================
+
              IDENTIFICAR MONITOR DE ÁGUA
+
              ================================================= */
 
         const waterDevice =
@@ -455,7 +568,9 @@ export const appRouter = router({
           );
 
         /* =================================================
+
              DADOS DO COMEDOURO
+
              ================================================= */
 
         const device = feeder?.local
@@ -475,7 +590,9 @@ export const appRouter = router({
           : null;
 
         /* =================================================
+
              SENSORES DA ÁGUA
+
              ================================================= */
 
         const waterSensors = waterDevice?.remote
@@ -496,24 +613,78 @@ export const appRouter = router({
             }
           : {
               temperature: null,
+
               conductivity: null,
+
               ph: null,
+
               turbidity: null,
+
               lastSeen: null,
+
               status: "offline",
+
               wifi: null,
             };
 
         /* =================================================
+
              FIREBASE HISTORY DO COMEDOURO
+
              ================================================= */
+
+        // HISTÓRICO PERMANENTE DO MONITOR DE ÁGUA
+        // As leituras são gravadas pelo ESP32 em devices/{id}/waterHistory.
+        let waterHistory: Array<{
+          timestamp: number;
+          temperature: number | null;
+          conductivity: number | null;
+          ph: number | null;
+          turbidity: number | null;
+        }> = [];
+
+        if (waterDevice?.local) {
+          const remoteWaterHistory = await firebaseRead<
+            Record<
+              string,
+              {
+                timestamp?: number | string;
+                temperature?: number | null;
+                conductivity?: number | null;
+                ph?: number | null;
+                turbidity?: number | null;
+              }
+            >
+          >(
+            `${firebaseDevicePath(waterDevice.local.id)}/waterHistory`,
+            'orderBy="%24key"&limitToLast=500',
+          );
+
+          waterHistory = Object.values(remoteWaterHistory ?? {})
+            .map((item) => ({
+              timestamp: Number(item.timestamp),
+              temperature:
+                item.temperature == null ? null : Number(item.temperature),
+              conductivity:
+                item.conductivity == null ? null : Number(item.conductivity),
+              ph: item.ph == null ? null : Number(item.ph),
+              turbidity: item.turbidity == null ? null : Number(item.turbidity),
+            }))
+            .filter(
+              (item) => Number.isFinite(item.timestamp) && item.timestamp > 0,
+            )
+            .sort((a, b) => a.timestamp - b.timestamp)
+            .slice(-500);
+        }
 
         let remoteHistory:
           | Record<
               string,
               {
                 type?: string;
+
                 quantity?: number;
+
                 createdAt?: number | string;
               }
             >
@@ -525,7 +696,9 @@ export const appRouter = router({
               string,
               {
                 type?: string;
+
                 quantity?: number;
+
                 createdAt?: number | string;
               }
             >
@@ -533,7 +706,9 @@ export const appRouter = router({
         }
 
         /* =================================================
+
              ALIMENTAÇÕES LOCAIS
+
              ================================================= */
 
         let localFeedings: Awaited<ReturnType<typeof db.getDeviceFeedings>> =
@@ -544,13 +719,17 @@ export const appRouter = router({
         }
 
         /* =================================================
+
              ALIMENTAÇÕES DO FIREBASE
+
              ================================================= */
 
         const remoteAutomatic = Object.entries(remoteHistory ?? {})
+
           .filter(
             ([, item]) => item.type === "automatic" || item.type === "manual",
           )
+
           .map(([key, item]) => ({
             id: -Number(key.slice(-8)) || 0,
 
@@ -573,11 +752,15 @@ export const appRouter = router({
           }));
 
         const feedings = [...localFeedings, ...remoteAutomatic]
+
           .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+
           .slice(0, 100);
 
         /* =================================================
+
              AGENDAMENTOS
+
              ================================================= */
 
         let schedules: Awaited<ReturnType<typeof db.getDeviceSchedules>> = [];
@@ -587,7 +770,9 @@ export const appRouter = router({
         }
 
         /* =================================================
+
              COLABORADORES
+
              ================================================= */
 
         let collaborators: Awaited<
@@ -599,7 +784,9 @@ export const appRouter = router({
         }
 
         /* =================================================
+
              RETORNO
+
              ================================================= */
 
         return {
@@ -628,9 +815,12 @@ export const appRouter = router({
             : null,
 
           waterSensors,
+          waterHistory,
 
           schedules,
+
           feedings,
+
           collaborators,
 
           firebaseConfigured: Boolean(firebaseUrl),
@@ -640,23 +830,30 @@ export const appRouter = router({
 
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
+
           message: "Erro ao carregar os dados dos dispositivos.",
+
           cause: error,
         });
       }
     }),
 
     /* =====================================================
+
        ADD DEVICE
+
        ===================================================== */
 
     addDevice: protectedProcedure
+
       .input(deviceInput)
+
       .mutation(async ({ ctx, input }) => {
         console.log("[DEVICE] Iniciando cadastro:", input);
 
         const existingDevices = await db.getDevicesForUser(
           ctx.user.id,
+
           ctx.user.email ?? undefined,
         );
 
@@ -667,6 +864,7 @@ export const appRouter = router({
         if (existing) {
           throw new TRPCError({
             code: "CONFLICT",
+
             message: "Esse ID já está cadastrado.",
           });
         }
@@ -751,16 +949,21 @@ export const appRouter = router({
       }),
 
     /* =====================================================
+
        RENAME DEVICE
+
        ===================================================== */
 
     renameDevice: protectedProcedure
+
       .input(
         z.object({
           deviceId: z.number(),
+
           name: z.string().min(2).max(120),
         }),
       )
+
       .mutation(async ({ ctx, input }) => {
         const access = await requireDevice(ctx.user, input.deviceId);
 
@@ -784,10 +987,13 @@ export const appRouter = router({
       }),
 
     /* =====================================================
+
        FEED NOW
+
        ===================================================== */
 
     feedNow: protectedProcedure
+
       .input(
         z.object({
           deviceId: z.number(),
@@ -795,12 +1001,14 @@ export const appRouter = router({
           quantity: z.number().int().min(1).max(10).default(1),
         }),
       )
+
       .mutation(async ({ ctx, input }) => {
         const access = await requireDevice(ctx.user, input.deviceId);
 
         if (access.device.type !== "feeder") {
           throw new TRPCError({
             code: "BAD_REQUEST",
+
             message: "Este dispositivo não é um comedouro.",
           });
         }
@@ -827,6 +1035,7 @@ export const appRouter = router({
 
         const sync = await firebaseWrite(
           `${firebaseDevicePath(access.device.id)}/command`,
+
           command,
         );
 
@@ -840,21 +1049,28 @@ export const appRouter = router({
 
         return {
           success: true,
+
           synced: true,
+
           requestId,
         };
       }),
 
     /* =====================================================
+
        ADD SCHEDULE
+
        ===================================================== */
 
     addSchedule: protectedProcedure
+
       .input(scheduleInput)
+
       .mutation(async ({ ctx, input }) => {
         const access = await requireDevice(ctx.user, input.deviceId);
 
         // Agendamentos são permitidos somente para dispositivos do tipo comedouro.
+
         const isFeeder =
           access.device.type === "feeder" ||
           access.device.type === "comedouro" ||
@@ -863,6 +1079,7 @@ export const appRouter = router({
         if (!isFeeder) {
           throw new TRPCError({
             code: "BAD_REQUEST",
+
             message: "Agendamentos só podem ser criados para o comedouro.",
           });
         }
@@ -870,6 +1087,7 @@ export const appRouter = router({
         if (!access.canManage) {
           throw new TRPCError({
             code: "FORBIDDEN",
+
             message:
               "Você não tem permissão para gerenciar a Programação de alimentação.",
           });
@@ -892,6 +1110,7 @@ export const appRouter = router({
         const firebaseSchedules = Object.fromEntries(
           rows.map((s) => [
             String(s.id),
+
             {
               hour: s.hour,
 
@@ -914,10 +1133,13 @@ export const appRouter = router({
       }),
 
     /* =====================================================
+
        TOGGLE SCHEDULE
+
        ===================================================== */
 
     toggleSchedule: protectedProcedure
+
       .input(
         z.object({
           scheduleId: z.number(),
@@ -925,9 +1147,11 @@ export const appRouter = router({
           active: z.boolean(),
         }),
       )
+
       .mutation(async ({ ctx, input }) => {
         const devices = await db.getDevicesForUser(
           ctx.user.id,
+
           ctx.user.email ?? undefined,
         );
 
@@ -971,6 +1195,7 @@ export const appRouter = router({
           schedules: Object.fromEntries(
             rows.map((s) => [
               String(s.id),
+
               {
                 hour: s.hour,
 
@@ -990,18 +1215,23 @@ export const appRouter = router({
       }),
 
     /* =====================================================
+
        DELETE SCHEDULE
+
        ===================================================== */
 
     deleteSchedule: protectedProcedure
+
       .input(
         z.object({
           scheduleId: z.number(),
         }),
       )
+
       .mutation(async ({ ctx, input }) => {
         const devices = await db.getDevicesForUser(
           ctx.user.id,
+
           ctx.user.email ?? undefined,
         );
 
@@ -1044,6 +1274,7 @@ export const appRouter = router({
             ? Object.fromEntries(
                 rows.map((s) => [
                   String(s.id),
+
                   {
                     hour: s.hour,
 
@@ -1067,10 +1298,13 @@ export const appRouter = router({
       }),
 
     /* =====================================================
+
        ADD COLLABORATOR
+
        ===================================================== */
 
     addCollaborator: protectedProcedure
+
       .input(
         z.object({
           deviceId: z.number(),
@@ -1078,17 +1312,22 @@ export const appRouter = router({
           email: z.string().email(),
 
           role: z
+
             .enum(["administrator", "collaborator"])
+
             .default("collaborator"),
         }),
       )
+
       .mutation(async ({ ctx, input }) => {
         const access = await requireDevice(ctx.user, input.deviceId);
 
         // Somente o proprietário ou administrador pode gerenciar colaboradores.
+
         if (!access.canManage) {
           throw new TRPCError({
             code: "FORBIDDEN",
+
             message: "Você não tem permissão para gerenciar colaboradores.",
           });
         }
@@ -1103,23 +1342,29 @@ export const appRouter = router({
 
         return {
           success: true,
+
           id: collaborator.id,
         };
       }),
 
     /* =====================================================
+
        REMOVE COLLABORATOR
+
        ===================================================== */
 
     removeCollaborator: protectedProcedure
+
       .input(
         z.object({
           collaboratorId: z.number(),
         }),
       )
+
       .mutation(async ({ ctx, input }) => {
         const devices = await db.getDevicesForUser(
           ctx.user.id,
+
           ctx.user.email ?? undefined,
         );
 

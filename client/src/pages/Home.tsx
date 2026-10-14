@@ -1958,51 +1958,23 @@ type WaterReading = {
   turbidity: number | null;
 };
 
-function WaterHistoryChart({ sensors }: { sensors: any }) {
+function WaterHistoryChart({ history }: { history?: WaterReading[] }) {
   const [metric, setMetric] = useState<
     "ph" | "temperature" | "conductivity" | "turbidity"
   >("ph");
-  const [readings, setReadings] = useState<WaterReading[]>([]);
-
-  useEffect(() => {
-    const timestamp = Number(sensors?.lastSeen);
-    if (!Number.isFinite(timestamp) || timestamp <= 0) return;
-
-    const reading: WaterReading = {
-      timestamp,
-      temperature:
-        Number.isFinite(Number(sensors?.temperature)) &&
-        sensors?.temperature != null
-          ? Number(sensors.temperature)
-          : null,
-      conductivity:
-        Number.isFinite(Number(sensors?.conductivity)) &&
-        sensors?.conductivity != null
-          ? Number(sensors.conductivity)
-          : null,
-      ph:
-        Number.isFinite(Number(sensors?.ph)) && sensors?.ph != null
-          ? Number(sensors.ph)
-          : null,
-      turbidity:
-        Number.isFinite(Number(sensors?.turbidity)) &&
-        sensors?.turbidity != null
-          ? Number(sensors.turbidity)
-          : null,
-    };
-
-    setReadings((previous) => {
-      if (previous.some((item) => item.timestamp === timestamp))
-        return previous;
-      return [...previous, reading].slice(-120);
-    });
-  }, [
-    sensors?.lastSeen,
-    sensors?.temperature,
-    sensors?.conductivity,
-    sensors?.ph,
-    sensors?.turbidity,
-  ]);
+  // O histórico vem do Firebase pelo servidor. Assim, não depende de a página
+  // estar aberta e continua disponível após fechar o navegador ou desligar o ESP32.
+  const readings = useMemo(
+    () =>
+      (Array.isArray(history) ? history : [])
+        .filter(
+          (item) =>
+            Number.isFinite(Number(item.timestamp)) &&
+            Number(item.timestamp) > 0,
+        )
+        .sort((a, b) => Number(a.timestamp) - Number(b.timestamp)),
+    [history],
+  );
 
   const config = {
     ph: { label: "pH", unit: "", color: "#8b5cf6" },
@@ -2040,9 +2012,13 @@ function WaterHistoryChart({ sensors }: { sensors: any }) {
   const max = maxValue + padding;
   const coordinates = points.map((point, index) => ({
     x:
-      points.length === 1
+      points.length === 1 ||
+      points[points.length - 1].timestamp === points[0].timestamp
         ? left + plotWidth / 2
-        : left + (index / (points.length - 1)) * plotWidth,
+        : left +
+          ((point.timestamp - points[0].timestamp) /
+            (points[points.length - 1].timestamp - points[0].timestamp)) *
+            plotWidth,
     y: top + ((max - point.value) / (max - min)) * plotHeight,
     ...point,
   }));
@@ -2065,8 +2041,9 @@ function WaterHistoryChart({ sensors }: { sensors: any }) {
           <span className="section-kicker">EVOLUÇÃO DOS SENSORES</span>
           <h3>Histórico das medições</h3>
           <p className="muted" style={{ marginTop: 6 }}>
-            O gráfico acompanha as leituras recebidas enquanto esta página está
-            aberta.
+            Histórico salvo no Firebase. As medições anteriores continuam
+            disponíveis mesmo quando o site está fechado ou o ESP32 fica
+            offline.
           </p>
         </div>
         <select
@@ -2211,10 +2188,9 @@ function WaterHistoryChart({ sensors }: { sensors: any }) {
         </svg>
       </div>
       <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
-        {readings.length} leitura(s) capturada(s) nesta sessão. *Confirme a
-        calibração e a unidade real dos sensores. O histórico ainda não é
-        permanente: ao recarregar ou fechar a página, estas amostras da sessão
-        são perdidas.
+        {readings.length} leitura(s) recuperada(s) do histórico permanente.
+        *Confirme a calibração e a unidade real dos sensores. Novas medições só
+        são registradas enquanto o ESP32 estiver ligado e conectado ao Firebase.
       </p>
     </section>
   );
@@ -2382,7 +2358,7 @@ function WaterMonitoringPage({
             />
           </div>
 
-          <WaterHistoryChart sensors={sensors} />
+          <WaterHistoryChart history={data?.waterHistory} />
 
           <section className="panel" style={{ marginTop: 18 }}>
             <div className="panel-heading">
