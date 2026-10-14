@@ -1222,6 +1222,669 @@ function formatTime(hour: number, minute: number) {
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
+const waterMonitorCode = `// MONITORAMENTO DE AGUA
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <time.h>
+#include <WiFiManager.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include <math.h>
+// ============================================================
+// CONFIGURAÇÕES DO FIREBASE
+// ============================================================
+#define FIREBASE_URL    "https://comedouro-a8211-default-rtdb.firebaseio.com"
+#define FIREBASE_SECRET "COLOQUE_SUA_CHAVE_FIREBASE"
+// ============================================================
+// IDENTIFICAÇÃO DO ESP32
+// ============================================================
+// ID NUMÉRICO cadastrado no site/Firebase
+// Exemplo: devices/5
+#define FIREBASE_DEVICE_ID "COLOQUE_O_ID_NUMERICO_DO_SITE"
+// ID físico do ESP32
+#define DEVICE_ID "agua-001"
+// ============================================================
+// TIPO DO DISPOSITIVO
+// ============================================================
+#define DEVICE_TYPE "water-monitor"
+// ============================================================
+// PINOS DOS SENSORES
+// ============================================================
+// DS18B20 - temperatura
+#define TEMP_PIN 25
+// TDS / Condutividade
+#define TDS_PIN 34
+// Turbidez
+#define TURBIDITY_PIN 33
+// pH
+#define PH_PIN 35
+// ============================================================
+// OBJETO DO DS18B20
+// ============================================================
+OneWire oneWire(TEMP_PIN);
+DallasTemperature temperatureSensor(&oneWire);
+// ============================================================
+// INTERVALO DE ENVIO
+// ============================================================
+#define SENSOR_INTERVAL 5000
+#define HEARTBEAT_INTERVAL 10000
+// ============================================================
+// VARIÁVEIS
+// ============================================================
+unsigned long lastSensorUpdate = 0;
+unsigned long lastHeartbeat = 0;
+WiFiClientSecure client;
+// ============================================================
+// URL DO DISPOSITIVO
+// ============================================================
+String devicePath() {
+return String(FIREBASE_URL) +
+"/devices/" +
+FIREBASE_DEVICE_ID;
+}
+// ============================================================
+// FIREBASE - PATCH
+// ============================================================
+bool firebasePatch(String path, String json) {
+HTTPClient http;
+String url =
+devicePath() +
+path +
+".json?auth=" +
+FIREBASE_SECRET;
+Serial.println();
+Serial.println("[Firebase PATCH]");
+Serial.println("Enviando requisicao ao Firebase (URL omitida por seguranca).");
+Serial.println(json);
+http.begin(client, url);
+http.addHeader(
+"Content-Type",
+"application/json"
+);
+int httpCode =
+http.sendRequest(
+"PATCH",
+json
+);
+Serial.print("HTTP: ");
+Serial.println(httpCode);
+String response =
+http.getString();
+if (response.length() > 0) {
+Serial.print("Resposta: ");
+Serial.println(response);
+}
+http.end();
+return httpCode >= 200 &&
+httpCode < 300;
+}
+// ============================================================
+// FIREBASE - PUT
+// ============================================================
+bool firebasePut(String path, String json) {
+HTTPClient http;
+String url =
+devicePath() +
+path +
+".json?auth=" +
+FIREBASE_SECRET;
+Serial.println();
+Serial.println("[Firebase PUT]");
+Serial.println("Enviando requisicao ao Firebase (URL omitida por seguranca).");
+Serial.println(json);
+http.begin(client, url);
+http.addHeader(
+"Content-Type",
+"application/json"
+);
+int httpCode =
+http.PUT(json);
+Serial.print("HTTP: ");
+Serial.println(httpCode);
+String response =
+http.getString();
+if (response.length() > 0) {
+Serial.print("Resposta: ");
+Serial.println(response);
+}
+http.end();
+return httpCode >= 200 &&
+httpCode < 300;
+}
+// ============================================================
+// LEITURA DA TEMPERATURA
+// ============================================================
+float readTemperature() {
+int deviceCount = temperatureSensor.getDeviceCount();
+if (deviceCount <= 0) {
+Serial.println("[Temperatura] ERRO: nenhum DS18B20 detectado no GPIO 25.");
+Serial.println("[Temperatura] Confira DATA, VCC, GND e o resistor pull-up de 4,7 kOhm.");
+return -127.0;
+}
+DeviceAddress sensorAddress;
+if (!temperatureSensor.getAddress(sensorAddress, 0)) {
+Serial.println("[Temperatura] ERRO: o sensor foi contado, mas seu endereco nao foi lido.");
+return -127.0;
+}
+temperatureSensor.requestTemperatures();
+float temperature = temperatureSensor.getTempC(sensorAddress);
+if (temperature == DEVICE_DISCONNECTED_C || !isfinite(temperature) ||
+temperature < -55.0 || temperature > 125.0) {
+Serial.print("[Temperatura] ERRO: leitura invalida. Dispositivos detectados: ");
+Serial.println(deviceCount);
+return -127.0;
+}
+Serial.print("[Temperatura] DS18B20 detectado. Temperatura: ");
+Serial.print(temperature, 2);
+Serial.println(" C");
+return temperature;
+}
+// ============================================================
+// LEITURA DO TDS
+// ============================================================
+//
+// ATENÇÃO:
+// O valor depende do módulo TDS utilizado.
+// Esta conversão é uma estimativa inicial.
+//
+// Depois podemos calibrar usando a leitura real
+// do seu sensor.
+//
+float readTDS(float temperature) {
+int raw =
+analogRead(TDS_PIN);
+float voltage =
+raw * (3.3 / 4095.0);
+// Compensação aproximada de temperatura
+float compensationCoefficient =
+1.0 +
+0.02 *
+(temperature - 25.0);
+float compensatedVoltage =
+voltage /
+compensationCoefficient;
+// Fórmula aproximada para TDS
+float tds =
+(133.42 *
+compensatedVoltage *
+compensatedVoltage *
+compensatedVoltage
+-
+255.86 *
+compensatedVoltage *
+compensatedVoltage
++
+857.39 *
+compensatedVoltage)
+* 0.5;
+if (tds < 0) {
+tds = 0;
+}
+Serial.print("[TDS] RAW: ");
+Serial.print(raw);
+Serial.print(" | Voltage: ");
+Serial.print(voltage, 3);
+Serial.print(" V | TDS: ");
+Serial.print(tds, 1);
+Serial.println(" ppm");
+return tds;
+}
+// ============================================================
+// LEITURA DO pH
+// ============================================================
+//
+// IMPORTANTE:
+// O pH precisa ser CALIBRADO conforme o módulo utilizado.
+//
+// Os valores abaixo são apenas uma referência inicial.
+//
+float readPH() {
+const int amostras = 20;
+long soma = 0;
+for (int i = 0; i < amostras; i++) {
+soma += analogRead(PH_PIN);
+delay(10);
+}
+float raw = soma / (float)amostras;
+float voltage = raw * (3.3 / 4095.0);
+// Fórmula provisória: ainda precisa de calibração
+float ph = 7.0 + ((2.50 - voltage) / 0.18);
+if (ph < 0) ph = 0;
+if (ph > 14) ph = 14;
+Serial.print("[pH] RAW médio: ");
+Serial.print(raw, 1);
+Serial.print(" | Tensão: ");
+Serial.print(voltage, 3);
+Serial.print(" V | pH: ");
+Serial.println(ph, 2);
+return ph;
+}
+// ============================================================
+// LEITURA DA TURBIDEZ
+// ============================================================
+float readTurbidity() {
+int raw =
+analogRead(TURBIDITY_PIN);
+float voltage =
+raw * (3.3 / 4095.0);
+// ----------------------------------------------------------
+// Conversão aproximada
+// ----------------------------------------------------------
+//
+// ATENÇÃO:
+// Cada sensor de turbidez possui comportamento diferente.
+//
+// Por enquanto enviamos uma escala aproximada.
+// Depois podemos calibrar em NTU.
+//
+float turbidity;
+if (voltage >= 2.5) {
+turbidity = 0;
+}
+else {
+turbidity =
+300.0 -
+(voltage * 120.0);
+}
+if (turbidity < 0) {
+turbidity = 0;
+}
+Serial.print("[Turbidez] RAW: ");
+Serial.print(raw);
+Serial.print(" | Voltage: ");
+Serial.print(voltage, 3);
+Serial.print(" V | Valor: ");
+Serial.println(turbidity, 1);
+return turbidity;
+}
+// ============================================================
+// ENVIA DADOS DOS SENSORES
+// ============================================================
+void sendSensorData() {
+if (WiFi.status() != WL_CONNECTED) {
+Serial.println(
+"[Sensores] Wi-Fi desconectado."
+);
+return;
+}
+// ----------------------------------------------------------
+// TEMPERATURA
+// ----------------------------------------------------------
+float temperature =
+readTemperature();
+// ----------------------------------------------------------
+// TDS
+// ----------------------------------------------------------
+float tds;
+if (temperature > -100) {
+tds =
+readTDS(temperature);
+}
+else {
+tds =
+readTDS(25.0);
+}
+// ----------------------------------------------------------
+// pH
+// ----------------------------------------------------------
+float ph =
+readPH();
+// ----------------------------------------------------------
+// TURBIDEZ
+// ----------------------------------------------------------
+float turbidity =
+readTurbidity();
+// ----------------------------------------------------------
+// TIMESTAMP
+// ----------------------------------------------------------
+time_t now =
+time(nullptr);
+long long timestamp =
+(long long)now * 1000LL;
+// ----------------------------------------------------------
+// JSON
+// ----------------------------------------------------------
+String json = "{";
+json += "\\"type\\":\\"";
+json += DEVICE_TYPE;
+json += "\\",";
+json += "\\"deviceId\\":\\"";
+json += DEVICE_ID;
+json += "\\",";
+json += "\\"temperature\\":";
+json += String(temperature, 2);
+json += ",";
+json += "\\"conductivity\\":";
+json += String(tds, 1);
+json += ",";
+json += "\\"tds\\":";
+json += String(tds, 1);
+json += ",";
+json += "\\"ph\\":";
+json += String(ph, 2);
+json += ",";
+json += "\\"turbidity\\":";
+json += String(turbidity, 1);
+json += ",";
+json += "\\"lastSeen\\":";
+json += String(timestamp);
+json += ",";
+json += "\\"status\\":\\"online\\",";
+json += "\\"wifi\\":";
+json += String(WiFi.RSSI());
+json += "}";
+Serial.println();
+Serial.println(
+"================================="
+);
+Serial.println(
+"      ENVIANDO DADOS DA ÁGUA"
+);
+Serial.println(
+"================================="
+);
+Serial.print("Temperatura: ");
+Serial.print(temperature);
+Serial.println(" °C");
+Serial.print("TDS: ");
+Serial.print(tds);
+Serial.println(" ppm");
+Serial.print("pH: ");
+Serial.println(ph);
+Serial.print("Turbidez: ");
+Serial.println(turbidity);
+Serial.println();
+bool success =
+firebasePatch(
+"",
+json
+);
+if (success) {
+Serial.println(
+"[Água] Dados enviados com sucesso!"
+);
+
+// Histórico permanente: cada leitura recebe uma chave própria no Firebase.
+// Assim o gráfico não depende de o site estar aberto.
+if (timestamp > 100000) {
+String historyId = String(timestamp) + "_" + String(millis());
+String historyJson = "{";
+historyJson += "\\"timestamp\\":" + String(timestamp) + ",";
+historyJson += "\\"temperature\\":" + String(temperature, 2) + ",";
+historyJson += "\\"conductivity\\":" + String(tds, 1) + ",";
+historyJson += "\\"tds\\":" + String(tds, 1) + ",";
+historyJson += "\\"ph\\":" + String(ph, 2) + ",";
+historyJson += "\\"turbidity\\":" + String(turbidity, 1);
+historyJson += "}";
+
+bool historySaved = firebasePut(
+"/waterHistory/" + historyId,
+historyJson
+);
+
+Serial.println(
+historySaved
+? "[Histórico] Leitura salva no Firebase."
+: "[Histórico] ERRO ao salvar leitura."
+);
+} else {
+Serial.println(
+"[Histórico] Horário inválido; leitura não foi gravada."
+);
+}
+}
+else {
+Serial.println(
+"[Água] ERRO ao enviar dados."
+);
+}
+}
+// ============================================================
+// HEARTBEAT
+// ============================================================
+void sendHeartbeat() {
+if (WiFi.status() != WL_CONNECTED) {
+return;
+}
+time_t now =
+time(nullptr);
+long long timestamp =
+(long long)now * 1000LL;
+String json = "{";
+json += "\\"type\\":\\"";
+json += DEVICE_TYPE;
+json += "\\",";
+json += "\\"deviceId\\":\\"";
+json += DEVICE_ID;
+json += "\\",";
+json += "\\"status\\":\\"online\\",";
+json += "\\"lastSeen\\":";
+json += String(timestamp);
+json += ",";
+json += "\\"wifi\\":";
+json += String(WiFi.RSSI());
+json += "}";
+bool success =
+firebasePatch(
+"",
+json
+);
+if (success) {
+Serial.println(
+"[Heartbeat] Monitor de água online."
+);
+}
+else {
+Serial.println(
+"[Heartbeat] Erro."
+);
+}
+}
+// ============================================================
+// CONFIGURAÇÃO WI-FI
+// ============================================================
+void connectWiFi() {
+Serial.println();
+Serial.println(
+"================================="
+);
+Serial.println(
+"     CONFIGURAÇÃO WI-FI"
+);
+Serial.println(
+"================================="
+);
+WiFi.mode(WIFI_STA);
+WiFiManager wm;
+wm.setConfigPortalTimeout(180);
+Serial.println(
+"Tentando conectar ao Wi-Fi salvo..."
+);
+bool conectado =
+wm.autoConnect("Agua-Setup");
+if (!conectado) {
+Serial.println(
+"Não foi possível conectar."
+);
+Serial.println(
+"Reiniciando ESP32..."
+);
+delay(3000);
+ESP.restart();
+}
+Serial.println();
+Serial.println(
+"Wi-Fi conectado!"
+);
+Serial.print("IP: ");
+Serial.println(WiFi.localIP());
+Serial.print("RSSI: ");
+Serial.println(WiFi.RSSI());
+}
+// ============================================================
+// CONFIGURAÇÃO DO HORÁRIO
+// ============================================================
+void setupTime() {
+configTime(
+-3 * 3600,
+0,
+"pool.ntp.org",
+"time.nist.gov"
+);
+Serial.println(
+"Sincronizando horário..."
+);
+time_t now =
+time(nullptr);
+int attempts = 0;
+while (
+now < 100000 &&
+attempts < 30
+) {
+delay(500);
+Serial.print(".");
+now =
+time(nullptr);
+attempts++;
+}
+Serial.println();
+if (now >= 100000) {
+Serial.println(
+"Horário sincronizado."
+);
+}
+else {
+Serial.println(
+"Não foi possível sincronizar horário."
+);
+}
+}
+// ============================================================
+// SETUP
+// ============================================================
+void setup() {
+Serial.begin(115200);
+delay(1000);
+Serial.println();
+Serial.println(
+"========================================"
+);
+Serial.println(
+"       MONITORAMENTO DA ÁGUA"
+);
+Serial.println(
+"========================================"
+);
+Serial.print(
+"Device ID: "
+);
+Serial.println(
+DEVICE_ID
+);
+Serial.print(
+"Firebase Device: "
+);
+Serial.println(
+FIREBASE_DEVICE_ID
+);
+Serial.print(
+"Tipo: "
+);
+Serial.println(
+DEVICE_TYPE
+);
+// ==========================================================
+// ADC
+// ==========================================================
+analogReadResolution(12);
+// ==========================================================
+// DS18B20
+// ==========================================================
+temperatureSensor.begin();
+temperatureSensor.setResolution(12);
+temperatureSensor.setWaitForConversion(true);
+Serial.print("[Sensor] DS18B20 inicializado no GPIO ");
+Serial.println(TEMP_PIN);
+Serial.print("[Sensor] Quantidade de DS18B20 detectados: ");
+Serial.println(temperatureSensor.getDeviceCount());
+if (temperatureSensor.getDeviceCount() == 0) {
+Serial.println("[Sensor] ATENCAO: nenhum sensor detectado. Verifique a ligacao; o codigo sozinho nao corrige fio desconectado ou falta do pull-up.");
+}
+// ==========================================================
+// HTTPS
+// ==========================================================
+client.setInsecure();
+// ==========================================================
+// WI-FI
+// ==========================================================
+connectWiFi();
+// ==========================================================
+// HORÁRIO
+// ==========================================================
+setupTime();
+// ==========================================================
+// PRIMEIRO HEARTBEAT
+// ==========================================================
+if (
+WiFi.status() ==
+WL_CONNECTED
+) {
+sendHeartbeat();
+delay(500);
+sendSensorData();
+}
+Serial.println();
+Serial.println(
+"Monitoramento iniciado!"
+);
+}
+// ============================================================
+// LOOP
+// ============================================================
+void loop() {
+// ==========================================================
+// VERIFICA WI-FI
+// ==========================================================
+if (
+WiFi.status() !=
+WL_CONNECTED
+) {
+Serial.println(
+"[Wi-Fi] Conexão perdida."
+);
+connectWiFi();
+delay(1000);
+return;
+}
+unsigned long now =
+millis();
+// ==========================================================
+// HEARTBEAT
+// ==========================================================
+if (
+now - lastHeartbeat >=
+HEARTBEAT_INTERVAL
+) {
+lastHeartbeat =
+now;
+sendHeartbeat();
+}
+// ==========================================================
+// LEITURA DOS SENSORES
+// ==========================================================
+if (
+now - lastSensorUpdate >=
+SENSOR_INTERVAL
+) {
+lastSensorUpdate =
+now;
+sendSensorData();
+}
+delay(50);
+}`;
+
 function LoginScreen() {
   return (
     <div className="auth-page">
@@ -2995,19 +3658,31 @@ function CollaboratorsPage({
 }
 
 function CodePage() {
+  const [codeType, setCodeType] = useState<"feeder" | "water">("feeder");
   const [copied, setCopied] = useState(false);
-  const copy = () => {
-    navigator.clipboard?.writeText(esp32Code);
-    setCopied(true);
-    toast.success("Código copiado para a área de transferência.");
-    setTimeout(() => setCopied(false), 1800);
+  const activeCode = codeType === "feeder" ? esp32Code : waterMonitorCode;
+  const fileName =
+    codeType === "feeder"
+      ? "comedouro-esp32.ino"
+      : "monitoramento-agua-esp32.ino";
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(activeCode);
+      setCopied(true);
+      toast.success("Código copiado para a área de transferência.");
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      toast.error(
+        "Não foi possível copiar. Selecione o código e copie manualmente.",
+      );
+    }
   };
   const download = () => {
-    const blob = new Blob([esp32Code], { type: "text/plain;charset=utf-8" });
+    const blob = new Blob([activeCode], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "comedouro-esp32.ino";
+    a.download = fileName;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -3016,7 +3691,7 @@ function CodePage() {
       <PageHeader
         eyebrow="FIRMWARE"
         title="Código ESP32"
-        description="Firmware base comentado para conectar seu dispositivo ao Firebase Realtime Database."
+        description="Escolha o dispositivo, copie o firmware ou baixe o arquivo para abrir na Arduino IDE."
         action={
           <div className="header-actions">
             <button className="secondary-button" onClick={copy}>
@@ -3029,6 +3704,46 @@ function CodePage() {
           </div>
         }
       />
+      <div className="panel" style={{ marginBottom: 18 }}>
+        <div className="panel-heading">
+          <div>
+            <span className="section-kicker">ESCOLHA O PROJETO</span>
+            <h3>Qual ESP32 você quer programar?</h3>
+          </div>
+          <Cpu size={20} />
+        </div>
+        <div className="header-actions" style={{ flexWrap: "wrap" }}>
+          <button
+            className={
+              codeType === "feeder" ? "primary-button" : "secondary-button"
+            }
+            onClick={() => {
+              setCodeType("feeder");
+              setCopied(false);
+            }}
+            aria-pressed={codeType === "feeder"}
+          >
+            <Zap size={16} /> Código do comedouro
+          </button>
+          <button
+            className={
+              codeType === "water" ? "primary-button" : "secondary-button"
+            }
+            onClick={() => {
+              setCodeType("water");
+              setCopied(false);
+            }}
+            aria-pressed={codeType === "water"}
+          >
+            <Droplets size={16} /> Monitoramento da água
+          </button>
+        </div>
+        <p className="helper-text" style={{ marginTop: 12 }}>
+          {codeType === "feeder"
+            ? "Firmware do comedouro: comunicação com o Firebase, comandos de alimentação e agendamentos."
+            : "Firmware do monitor de água: temperatura DS18B20, TDS/condutividade, pH, turbidez e gravação das medições no histórico do Firebase."}
+        </p>
+      </div>
       <div className="code-layout">
         <section className="code-card">
           <div className="code-toolbar">
@@ -3037,23 +3752,34 @@ function CodePage() {
               <span className="code-dot yellow" />
               <span className="code-dot green" />
             </div>
-            <span>comedouro-esp32.ino</span>
+            <span>{fileName}</span>
             <button onClick={copy}>
-              <Clipboard size={15} /> Copiar
+              <Clipboard size={15} /> {copied ? "Copiado" : "Copiar"}
             </button>
           </div>
           <pre>
-            <code>{esp32Code}</code>
+            <code>{activeCode}</code>
           </pre>
         </section>
         <aside className="panel code-side">
           <span className="section-kicker">ANTES DO UPLOAD</span>
           <h3>Checklist rápido</h3>
           <div className="check-list">
-            <CheckItem text="Preencha Wi-Fi e token Firebase" />
-            <CheckItem text="Ajuste SERVO_PIN para seu circuito" />
-            <CheckItem text="Instale as bibliotecas necessárias" />
-            <CheckItem text="Faça o upload pela Arduino IDE" />
+            {codeType === "feeder" ? (
+              <>
+                <CheckItem text="Configure a conexão Wi-Fi e Firebase" />
+                <CheckItem text="Confira o ID numérico do dispositivo" />
+                <CheckItem text="Instale as bibliotecas necessárias" />
+                <CheckItem text="Confira os pinos do seu circuito" />
+              </>
+            ) : (
+              <>
+                <CheckItem text="Substitua o ID pelo ID numérico do monitor cadastrado no site" />
+                <CheckItem text="Configure sua chave de acesso do Firebase localmente" />
+                <CheckItem text="Instale WiFiManager, ArduinoJson, OneWire e DallasTemperature" />
+                <CheckItem text="Confira os pinos dos sensores no seu circuito" />
+              </>
+            )}
           </div>
           <button
             className="link-button"
@@ -3064,8 +3790,9 @@ function CodePage() {
           <div className="warning-box">
             <AlertCircle size={16} />
             <span>
-              O token é responsabilidade do proprietário. Não compartilhe seu
-              arquivo .ino publicamente.
+              {codeType === "water"
+                ? "O código é um modelo para adaptação. Configure suas credenciais e confira os pinos e a calibração dos sensores antes de usar. Nunca publique sua chave privada do Firebase."
+                : "Configure suas credenciais localmente e não compartilhe chaves privadas ou tokens em repositórios públicos."}
             </span>
           </div>
         </aside>
@@ -3126,8 +3853,9 @@ function InstallPage() {
             <div>
               <h3>Instale as bibliotecas</h3>
               <p>
-                Use o Gerenciador de Bibliotecas para instalar ArduinoJson 6.x.
-                WiFi e HTTPClient já acompanham o ESP32.
+                Para o comedouro, instale ArduinoJson 6.x e WiFiManager. Para o
+                monitoramento da água, instale também OneWire e
+                DallasTemperature. WiFi e HTTPClient acompanham o pacote ESP32.
               </p>
             </div>
           </div>
@@ -3136,8 +3864,9 @@ function InstallPage() {
             <div>
               <h3>Configure e envie o código</h3>
               <p>
-                Abra o arquivo .ino, preencha Wi-Fi, token, DEVICE_ID e pino do
-                mecanismo. Selecione sua placa e clique em Upload.
+                Abra o arquivo .ino correspondente, configure as credenciais, o
+                ID numérico do dispositivo e os pinos do circuito. Selecione sua
+                placa e clique em Upload.
               </p>
             </div>
           </div>
