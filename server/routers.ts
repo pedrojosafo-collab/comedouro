@@ -1081,14 +1081,27 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         const access = await requireDevice(ctx.user, input.deviceId);
 
-        if (access.device.type !== "feeder") {
+        const remoteDevice = await firebaseRead<{
+          type?: string;
+        }>(firebaseDevicePath(access.device.id));
+
+        const deviceIdLower = access.device.deviceId.toLowerCase();
+
+        const isFeeder =
+          access.device.type === "feeder" ||
+          access.device.type === "comedouro" ||
+          remoteDevice?.type === "feeder" ||
+          remoteDevice?.type === "comedouro" ||
+          deviceIdLower.includes("comedouro") ||
+          deviceIdLower.includes("feeder");
+
+        if (!isFeeder) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-
-            message: "Este dispositivo não é um comedouro.",
+            message:
+              "Este dispositivo não está identificado como comedouro. Confira o tipo e o ID cadastrado.",
           });
         }
-
         const now = Date.now();
 
         const requestId = randomUUID();
@@ -1147,15 +1160,23 @@ export const appRouter = router({
 
         // Agendamentos são permitidos somente para dispositivos do tipo comedouro.
 
+        const remoteDevice = await firebaseRead<{
+          type?: string;
+        }>(firebaseDevicePath(access.device.id));
+
+        const deviceIdLower = access.device.deviceId.toLowerCase();
+
         const isFeeder =
           access.device.type === "feeder" ||
           access.device.type === "comedouro" ||
-          access.device.deviceId.toLowerCase().includes("comedouro");
+          remoteDevice?.type === "feeder" ||
+          remoteDevice?.type === "comedouro" ||
+          deviceIdLower.includes("comedouro") ||
+          deviceIdLower.includes("feeder");
 
         if (!isFeeder) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-
             message: "Agendamentos só podem ser criados para o comedouro.",
           });
         }
