@@ -66,6 +66,7 @@ const esp32Code = `#include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <time.h>
+#include <sys/time.h>
 #include <WiFiManager.h>
 
 // ============================================================
@@ -984,6 +985,93 @@ void connectWiFi() {
 // CONFIGURAÇÃO DO HORÁRIO
 // ============================================================
 
+
+bool syncTimeFromFirebaseDate() {
+  WiFiClientSecure timeClient;
+  timeClient.setInsecure();
+
+  HTTPClient http;
+  const char *headerKeys[] = {"Date"};
+  http.collectHeaders(headerKeys, 1);
+
+  String url = String(FIREBASE_URL) +
+               "/devices/" + String(FIREBASE_DEVICE_ID) +
+               ".json?auth=" + String(FIREBASE_SECRET);
+
+  if (!http.begin(timeClient, url)) {
+    Serial.println("[Hora] Não foi possível iniciar HTTPS para obter a data.");
+    return false;
+  }
+
+  http.setTimeout(5000);
+  int code = http.GET();
+  String dateHeader = http.header("Date");
+  http.end();
+
+  if (code < 200 || code >= 300 || dateHeader.length() == 0) {
+    Serial.printf("[Hora] Data HTTPS indisponível. HTTP: %d\\n", code);
+    return false;
+  }
+
+  char weekday[4] = {0};
+  char monthName[4] = {0};
+  char timezone[4] = {0};
+  int day = 0, year = 0, hour = 0, minute = 0, second = 0;
+
+  int parsed = sscanf(dateHeader.c_str(),
+                      "%3s, %d %3s %d %d:%d:%d %3s",
+                      weekday, &day, monthName, &year,
+                      &hour, &minute, &second, timezone);
+
+  if (parsed != 8) {
+    Serial.print("[Hora] Cabeçalho Date inválido: ");
+    Serial.println(dateHeader);
+    return false;
+  }
+
+  const char *months[] = {
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+  };
+
+  int month = -1;
+  for (int i = 0; i < 12; i++) {
+    if (strcmp(monthName, months[i]) == 0) {
+      month = i;
+      break;
+    }
+  }
+
+  if (month < 0 || day < 1 || day > 31 ||
+      hour > 23 || minute > 59 || second > 60) {
+    Serial.println("[Hora] Valores de data inválidos.");
+    return false;
+  }
+
+  struct tm parsedTime = {};
+  parsedTime.tm_year = year - 1900;
+  parsedTime.tm_mon = month;
+  parsedTime.tm_mday = day;
+  parsedTime.tm_hour = hour;
+  parsedTime.tm_min = minute;
+  parsedTime.tm_sec = second;
+
+  time_t utc = timegm(&parsedTime);
+  if (utc < 100000) {
+    Serial.println("[Hora] Data HTTPS resultou em timestamp inválido.");
+    return false;
+  }
+
+  struct timeval tv;
+  tv.tv_sec = utc;
+  tv.tv_usec = 0;
+  settimeofday(&tv, nullptr);
+
+  Serial.print("[Hora] Relógio sincronizado pelo cabeçalho HTTPS: ");
+  Serial.println(dateHeader);
+  return true;
+}
+
 void setupTime() {
 
   configTime(
@@ -1018,6 +1106,10 @@ void setupTime() {
   }
 
   Serial.println();
+
+  if (now < 100000 && syncTimeFromFirebaseDate()) {
+    now = time(nullptr);
+  }
 
   if (now >= 100000) {
 
@@ -1228,6 +1320,7 @@ const waterMonitorCode = `// MONITORAMENTO DE AGUA
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <time.h>
+#include <sys/time.h>
 #include <WiFiManager.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
@@ -1726,6 +1819,93 @@ Serial.println(WiFi.RSSI());
 // ============================================================
 // CONFIGURAÇÃO DO HORÁRIO
 // ============================================================
+
+bool syncTimeFromFirebaseDate() {
+  WiFiClientSecure timeClient;
+  timeClient.setInsecure();
+
+  HTTPClient http;
+  const char *headerKeys[] = {"Date"};
+  http.collectHeaders(headerKeys, 1);
+
+  String url = String(FIREBASE_URL) +
+               "/devices/" + String(FIREBASE_DEVICE_ID) +
+               ".json?auth=" + String(FIREBASE_SECRET);
+
+  if (!http.begin(timeClient, url)) {
+    Serial.println("[Hora] Não foi possível iniciar HTTPS para obter a data.");
+    return false;
+  }
+
+  http.setTimeout(5000);
+  int code = http.GET();
+  String dateHeader = http.header("Date");
+  http.end();
+
+  if (code < 200 || code >= 300 || dateHeader.length() == 0) {
+    Serial.printf("[Hora] Data HTTPS indisponível. HTTP: %d\\n", code);
+    return false;
+  }
+
+  char weekday[4] = {0};
+  char monthName[4] = {0};
+  char timezone[4] = {0};
+  int day = 0, year = 0, hour = 0, minute = 0, second = 0;
+
+  int parsed = sscanf(dateHeader.c_str(),
+                      "%3s, %d %3s %d %d:%d:%d %3s",
+                      weekday, &day, monthName, &year,
+                      &hour, &minute, &second, timezone);
+
+  if (parsed != 8) {
+    Serial.print("[Hora] Cabeçalho Date inválido: ");
+    Serial.println(dateHeader);
+    return false;
+  }
+
+  const char *months[] = {
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+  };
+
+  int month = -1;
+  for (int i = 0; i < 12; i++) {
+    if (strcmp(monthName, months[i]) == 0) {
+      month = i;
+      break;
+    }
+  }
+
+  if (month < 0 || day < 1 || day > 31 ||
+      hour > 23 || minute > 59 || second > 60) {
+    Serial.println("[Hora] Valores de data inválidos.");
+    return false;
+  }
+
+  struct tm parsedTime = {};
+  parsedTime.tm_year = year - 1900;
+  parsedTime.tm_mon = month;
+  parsedTime.tm_mday = day;
+  parsedTime.tm_hour = hour;
+  parsedTime.tm_min = minute;
+  parsedTime.tm_sec = second;
+
+  time_t utc = timegm(&parsedTime);
+  if (utc < 100000) {
+    Serial.println("[Hora] Data HTTPS resultou em timestamp inválido.");
+    return false;
+  }
+
+  struct timeval tv;
+  tv.tv_sec = utc;
+  tv.tv_usec = 0;
+  settimeofday(&tv, nullptr);
+
+  Serial.print("[Hora] Relógio sincronizado pelo cabeçalho HTTPS: ");
+  Serial.println(dateHeader);
+  return true;
+}
+
 void setupTime() {
 configTime(
 -3 * 3600,
@@ -1750,6 +1930,9 @@ time(nullptr);
 attempts++;
 }
 Serial.println();
+if (now < 100000 && syncTimeFromFirebaseDate()) {
+now = time(nullptr);
+}
 if (now >= 100000) {
 Serial.println(
 "Horário sincronizado."

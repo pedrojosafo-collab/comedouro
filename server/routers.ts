@@ -577,7 +577,7 @@ export const appRouter = router({
               : device.lastSeen;
 
             const online = Boolean(
-              lastSeen && Date.now() - lastSeen.getTime() < 30000,
+              lastSeen && Date.now() - lastSeen.getTime() < 90000,
             );
 
             if (lastSeen) {
