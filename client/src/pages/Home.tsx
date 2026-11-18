@@ -67,21 +67,23 @@ const esp32Code = `#include <WiFi.h>
 #include <ArduinoJson.h>
 #include <time.h>
 #include <sys/time.h>
+#include <stdint.h>
 #include <WiFiManager.h>
+#include <WebServer.h>
 
 // ============================================================
 // CONFIGURAÇÕES DO FIREBASE
 // ============================================================
 
 #define FIREBASE_URL    "https://comedouro-a8211-default-rtdb.firebaseio.com"
-#define FIREBASE_SECRET "..."
+#define FIREBASE_SECRET ""
 
 // ============================================================
 // ID DO DISPOSITIVO
 // ============================================================
 
-#define FIREBASE_DEVICE_ID "..."
-#define DEVICE_ID "..."
+#define FIREBASE_DEVICE_ID ""
+#define DEVICE_ID ""
 
 // ============================================================
 // RELÉ
@@ -122,6 +124,20 @@ String lastCommandId = "";
 String lastScheduleExecution = "";
 
 WiFiClientSecure client;
+WebServer server(80);
+
+
+// Rede permanente para controlar o comedouro
+const char* AP_SSID = "Comedouro_Controle";
+const char* AP_PASSWORD = "";
+
+// Rede temporária para configurar a internet
+const char* CONFIG_SSID = "Configurar_Comedouro";
+const char* CONFIG_PASSWORD = "";
+
+unsigned long lastWifiReconnect = 0;
+const unsigned long WIFI_RECONNECT_INTERVAL = 15000;
+bool localServerStarted = false;
 
 // ============================================================
 // CAMINHO DO DISPOSITIVO
@@ -169,6 +185,11 @@ void relayOff() {
 
 bool firebasePut(String path, String json) {
 
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[Firebase] Sem Wi-Fi com internet; gravação ignorada.");
+    return false;
+  }
+
   HTTPClient http;
 
   String url =
@@ -213,6 +234,8 @@ bool firebasePut(String path, String json) {
 
 String firebaseGet(String path) {
 
+  if (WiFi.status() != WL_CONNECTED) return "";
+
   HTTPClient http;
 
   String url =
@@ -254,6 +277,8 @@ String firebaseGet(String path) {
 // ============================================================
 
 bool firebaseDelete(String path) {
+
+  if (WiFi.status() != WL_CONNECTED) return false;
 
   HTTPClient http;
 
@@ -308,14 +333,9 @@ void sendHeartbeat() {
     (long long)now * 1000LL;
 
   String json = "{";
-
   json += "\"status\":\"online\",";
-  json += "\"lastSeen\":" +
-          String(timestamp) +
-          ",";
-  json += "\"wifi\":" +
-          String(WiFi.RSSI());
-
+  json += "\"lastSeen\":" + String(timestamp) + ",";
+  json += "\"wifi\":" + String(WiFi.RSSI());
   json += "}";
 
   HTTPClient http;
@@ -382,6 +402,11 @@ void registerFeeding(
   String commandId
 ) {
 
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[Feeding] Demonstração offline: alimentação não será enviada ao Firebase.");
+    return;
+  }
+
   time_t now = time(nullptr);
 
   long long timestamp =
@@ -420,33 +445,13 @@ void registerFeeding(
     String(millis());
 
   String historyJson = "{";
-
-  historyJson += "\"createdAt\":" +
-                 String(timestamp) +
-                 ",";
-
-  historyJson += "\"timestamp\":" +
-                 String(timestamp) +
-                 ",";
-
-  historyJson += "\"type\":\"" +
-                 type +
-                 "\",";
-
-  historyJson += "\"quantity\":" +
-                 String(quantity) +
-                 ",";
-
-  historyJson += "\"deviceId\":\"" +
-                 String(DEVICE_ID) +
-                 "\",";
-
-  historyJson += "\"commandId\":\"" +
-                 commandId +
-                 "\",";
-
+  historyJson += "\"createdAt\":" + String(timestamp) + ",";
+  historyJson += "\"timestamp\":" + String(timestamp) + ",";
+  historyJson += "\"type\":\"" + type + "\",";
+  historyJson += "\"quantity\":" + String(quantity) + ",";
+  historyJson += "\"deviceId\":\"" + String(DEVICE_ID) + "\",";
+  historyJson += "\"commandId\":\"" + commandId + "\",";
   historyJson += "\"status\":\"success\"";
-
   historyJson += "}";
 
   bool historyOK =
@@ -502,9 +507,8 @@ void feedFish(
   String commandId
 ) {
 
-  if (quantity < 1) {
-    quantity = 1;
-  }
+  if (quantity < 1) quantity = 1;
+  if (quantity > 10) quantity = 10;
 
   Serial.println();
   Serial.println("==============================");
@@ -917,68 +921,625 @@ void checkSchedules() {
 // CONFIGURAÇÃO DO WI-FI
 // ============================================================
 
-void connectWiFi() {
 
+void connectWiFi() {
   Serial.println();
   Serial.println("==============================");
-  Serial.println("      CONFIGURAÇÃO WI-FI");
+  Serial.println(" INICIANDO WI-FI DO COMEDOURO");
   Serial.println("==============================");
 
-  WiFi.mode(WIFI_STA);
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.setSleep(false);
+  WiFi.setAutoReconnect(true);
 
-  WiFiManager wm;
+  // 1. Tenta a última rede salva.
+  Serial.println("[Wi-Fi] Tentando rede salva...");
 
-  wm.setConfigPortalTimeout(180);
+  WiFi.begin();
 
-  Serial.println(
-    "Tentando conectar ao Wi-Fi salvo..."
-  );
+  unsigned long inicio = millis();
 
-  bool conectado =
-    wm.autoConnect("wifi-Comedouro");
+  while (WiFi.status() != WL_CONNECTED &&
+       millis() - inicio < 5000) {
+  delay(100);
+  Serial.print(".");
+}
+  Serial.println();
 
-  // ==========================================================
-  // FALHOU
-  // ==========================================================
+  // 2. Se falhar, abre o portal temporário.
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[Wi-Fi] Abrindo portal de configuração...");
 
-  if (!conectado) {
+    WiFiManager wifiManager;
 
-    Serial.println();
+    wifiManager.setConfigPortalTimeout(30);
+    wifiManager.setConnectTimeout(8);
+    wifiManager.setWiFiAutoReconnect(true);
 
-    Serial.println(
-      "Não foi possível conectar."
+    bool conectado = wifiManager.startConfigPortal(
+      CONFIG_SSID,
+      CONFIG_PASSWORD
     );
 
-    Serial.println(
-      "Reiniciando ESP32..."
+    if (conectado && WiFi.status() == WL_CONNECTED) {
+      Serial.println("[Wi-Fi] Nova rede cadastrada!");
+    } else {
+      Serial.println("[Wi-Fi] Configuração não concluída.");
+    }
+  }
+
+  // 3. Encerra o portal temporário.
+  WiFi.softAPdisconnect(true);
+  delay(500);
+
+  // 4. Mantém a rede de controle local.
+  WiFi.mode(WIFI_AP_STA);
+  delay(300);
+
+  bool apOK = WiFi.softAP(AP_SSID, AP_PASSWORD);
+
+  if (apOK) {
+    Serial.println("[Wi-Fi] Controle local ativado!");
+    Serial.print("[Wi-Fi] Rede: ");
+    Serial.println(AP_SSID);
+    Serial.print("[Wi-Fi] Senha: ");
+    Serial.println(AP_PASSWORD);
+    Serial.print("[Wi-Fi] Endereço: http://");
+    Serial.println(WiFi.softAPIP());
+  } else {
+    Serial.println("[Wi-Fi] ERRO ao iniciar controle local!");
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.print("[Wi-Fi] Internet conectada: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("[Wi-Fi] Funcionando sem internet.");
+  }
+}
+
+
+// ============================================================
+// SERVIDOR WEB LOCAL - CONTROLE PELO CELULAR
+// ============================================================
+
+
+String localPage(String message = "") {
+  String html = R"rawliteral(
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#103f35">
+<title>Comedouro | Controle local</title>
+
+<style>
+:root {
+  --green-dark:#103f35;
+  --green:#176b59;
+  --green-light:#dff4e9;
+  --mint:#b8ead3;
+  --background:#f4f7f5;
+  --text:#173b32;
+  --muted:#82918a;
+  --border:#e1eae5;
+  --white:#fff;
+}
+
+* { box-sizing:border-box; }
+
+body {
+  margin:0;
+  font-family:Arial, sans-serif;
+  background:var(--background);
+  color:var(--text);
+}
+
+.topbar {
+  height:72px;
+  background:var(--green-dark);
+  color:white;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:0 6%;
+}
+
+.brand {
+  display:flex;
+  align-items:center;
+  gap:12px;
+  font-size:18px;
+  font-weight:bold;
+  letter-spacing:.5px;
+}
+
+.brand-icon {
+  width:38px;
+  height:38px;
+  border-radius:12px;
+  background:var(--mint);
+  color:var(--green-dark);
+  display:grid;
+  place-items:center;
+  font-size:21px;
+}
+
+.top-status {
+  color:#c4e6d7;
+  font-size:13px;
+}
+
+.container {
+  width:100%;
+  max-width:1050px;
+  margin:0 auto;
+  padding:38px 24px 55px;
+}
+
+.eyebrow {
+  font-size:11px;
+  letter-spacing:2px;
+  text-transform:uppercase;
+  color:#638d7d;
+  font-weight:bold;
+}
+
+h1 {
+  font-size:clamp(27px,4vw,39px);
+  letter-spacing:-1.5px;
+  margin:12px 0 8px;
+  color:#123e34;
+}
+
+.subtitle {
+  color:#7a8982;
+  font-size:14px;
+  line-height:1.6;
+  margin:0 0 28px;
+}
+
+.status-card {
+  background:#ddf3e7;
+  border:1px solid #c5e9d5;
+  border-radius:17px;
+  padding:22px 25px;
+  display:flex;
+  align-items:center;
+  gap:17px;
+  margin-bottom:22px;
+}
+
+.status-icon {
+  width:49px;
+  height:49px;
+  border-radius:14px;
+  background:#b9e8d0;
+  display:grid;
+  place-items:center;
+  font-size:23px;
+  flex-shrink:0;
+}
+
+.status-info { flex:1; }
+
+.status-info small {
+  display:block;
+  color:#49806a;
+  font-size:10px;
+  letter-spacing:2px;
+  margin-bottom:7px;
+}
+
+.status-info strong {
+  display:block;
+  font-size:17px;
+  margin-bottom:5px;
+}
+
+.status-info span {
+  font-size:12px;
+  color:#668578;
+}
+
+.status-pill {
+  background:#fff;
+  color:#168052;
+  border-radius:30px;
+  padding:9px 14px;
+  font-size:12px;
+  font-weight:bold;
+  white-space:nowrap;
+}
+
+.grid {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:18px;
+}
+
+.panel {
+  background:white;
+  border:1px solid var(--border);
+  border-radius:17px;
+  padding:25px;
+  box-shadow:0 3px 12px rgba(20,60,45,.025);
+}
+
+.panel-heading {
+  display:flex;
+  align-items:center;
+  gap:12px;
+  margin-bottom:22px;
+}
+
+.panel-icon {
+  width:42px;
+  height:42px;
+  border-radius:12px;
+  display:grid;
+  place-items:center;
+  font-size:20px;
+  background:#e0f5e9;
+}
+
+.panel-icon.orange {
+  background:#fff0d5;
+}
+
+.panel-heading small {
+  display:block;
+  color:#7b9488;
+  font-size:10px;
+  letter-spacing:1.6px;
+  margin-bottom:5px;
+}
+
+.panel-heading h2 {
+  font-size:18px;
+  margin:0;
+  color:#173f34;
+}
+
+.description {
+  font-size:13px;
+  color:#84918b;
+  line-height:1.6;
+  margin:-10px 0 20px;
+}
+
+label {
+  display:block;
+  color:#49645a;
+  font-size:12px;
+  font-weight:bold;
+  margin:17px 0 8px;
+}
+
+select, input {
+  width:100%;
+  height:47px;
+  border:1px solid #dce7e1;
+  border-radius:10px;
+  padding:0 13px;
+  background:#fff;
+  color:#24483b;
+  font-size:14px;
+  outline:none;
+}
+
+select:focus, input:focus {
+  border-color:#58a987;
+  box-shadow:0 0 0 3px #58a98720;
+}
+
+.button {
+  display:block;
+  width:100%;
+  border:0;
+  border-radius:11px;
+  padding:15px;
+  margin-top:22px;
+  background:var(--green);
+  color:white;
+  font-size:13px;
+  font-weight:bold;
+  letter-spacing:.5px;
+  cursor:pointer;
+  transition:.2s;
+}
+
+.button:hover {
+  background:#0e5747;
+  transform:translateY(-1px);
+}
+
+.button.orange {
+  background:#d99127;
+}
+
+.button.orange:hover {
+  background:#bd7615;
+}
+
+.info-box {
+  margin-top:17px;
+  padding:12px 14px;
+  border-radius:10px;
+  background:#f1f7f3;
+  color:#70877b;
+  font-size:11px;
+  line-height:1.6;
+}
+
+.message {
+  background:#e4f5e9;
+  color:#176b43;
+  border:1px solid #c6e9d3;
+  padding:14px 17px;
+  border-radius:12px;
+  margin-bottom:20px;
+  font-size:13px;
+}
+
+.footer {
+  text-align:center;
+  color:#9aa79f;
+  font-size:11px;
+  margin-top:28px;
+}
+
+@media(max-width:720px) {
+  .grid { grid-template-columns:1fr; }
+  .container { padding:28px 15px 40px; }
+  .topbar { padding:0 18px; }
+  .status-card { padding:17px; flex-wrap:wrap; }
+  .status-pill { margin-left:65px; }
+  .panel { padding:21px; }
+}
+</style>
+</head>
+
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-icon">♧</div>
+    COMEDOURO
+  </div>
+  <div class="top-status">● Controle local do dispositivo</div>
+</header>
+
+<main class="container">
+
+  <div class="eyebrow">ÁREA DE CONTROLE</div>
+  <h1>Olá! Vamos cuidar do seu comedouro.</h1>
+  <p class="subtitle">
+    Gerencie a alimentação dos peixes e programe os próximos horários
+    diretamente pelo seu celular.
+  </p>
+
+  <section class="status-card">
+    <div class="status-icon">⌁</div>
+    <div class="status-info">
+      <small>STATUS DO DISPOSITIVO</small>
+      <strong>Comedouro conectado ao controle local</strong>
+      <span>O ESP32 está disponível nesta rede.</span>
+    </div>
+    <div class="status-pill">● ATIVO</div>
+  </section>
+
+)rawliteral";
+
+  if (message.length()) {
+    html += "<div class='message'>" + message + "</div>";
+  }
+
+  html += R"rawliteral(
+
+  <section class="grid">
+
+    <!-- ALIMENTAÇÃO MANUAL -->
+    <div class="panel">
+      <div class="panel-heading">
+        <div class="panel-icon">⚡</div>
+        <div>
+          <small>CONTROLE IMEDIATO</small>
+          <h2>Alimentação manual</h2>
+        </div>
+      </div>
+
+      <p class="description">
+        Libere a alimentação dos peixes quando desejar.
+        Escolha a quantidade de porções e envie o comando ao equipamento.
+      </p>
+
+      <form method="POST" action="/feed">
+        <label for="quantity">Quantidade de porções</label>
+        <select id="quantity" name="quantity">
+          <option value="1">1 porção</option>
+          <option value="2">2 porções</option>
+          <option value="3">3 porções</option>
+          <option value="4">4 porções</option>
+          <option value="5">5 porções</option>
+          <option value="6">6 porções</option>
+          <option value="7">7 porções</option>
+          <option value="8">8 porções</option>
+          <option value="9">9 porções</option>
+          <option value="10">10 porções</option>
+        </select>
+
+        <button class="button" type="submit">
+          LIBERAR ALIMENTAÇÃO →
+        </button>
+      </form>
+
+      <div class="info-box">
+        A alimentação manual é executada pelo próprio ESP32.
+      </div>
+    </div>
+
+    <!-- AGENDAMENTO -->
+    <div class="panel">
+      <div class="panel-heading">
+        <div class="panel-icon orange">◷</div>
+        <div>
+          <small>ROTINA ALIMENTAR</small>
+          <h2>Programar alimentação</h2>
+        </div>
+      </div>
+
+      <p class="description">
+        Defina um horário e a quantidade de porções.
+        O ESP32 verificará o agendamento automaticamente.
+      </p>
+
+      <form method="POST" action="/schedule">
+
+        <label for="time">Horário da alimentação</label>
+        <input
+          type="time"
+          id="time"
+          name="time"
+          required
+        >
+
+        <label for="scheduleQuantity">Quantidade de porções</label>
+        <select id="scheduleQuantity" name="quantity">
+          <option value="1">1 porção</option>
+          <option value="2">2 porções</option>
+          <option value="3">3 porções</option>
+          <option value="4">4 porções</option>
+          <option value="5">5 porções</option>
+          <option value="6">6 porções</option>
+          <option value="7">7 porções</option>
+          <option value="8">8 porções</option>
+          <option value="9">9 porções</option>
+          <option value="10">10 porções</option>
+        </select>
+
+        <button class="button orange" type="submit">
+          SALVAR AGENDAMENTO →
+        </button>
+      </form>
+
+      <div class="info-box">
+        O agendamento será salvo no Firebase e sincronizado com o sistema.
+        É necessário que o ESP32 esteja conectado à internet.
+      </div>
+    </div>
+
+  </section>
+
+  <div class="footer">
+    COMEDOURO AUTOMATIZADO • IF BAIANO
+    <br>
+    Controle local do equipamento
+  </div>
+
+</main>
+</body>
+</html>
+)rawliteral";
+
+  return html;
+}
+
+
+void startLocalServer() {
+  server.on("/", HTTP_GET, []() {
+    server.send(200, "text/html; charset=utf-8", localPage());
+  });
+
+  server.on("/feed", HTTP_POST, []() {
+    int quantity = server.hasArg("quantity") ? server.arg("quantity").toInt() : 1;
+    if (quantity < 1) quantity = 1;
+    if (quantity > 10) quantity = 10;
+    String commandId = "local-" + String((uint32_t)esp_random(), HEX) + "-" + String(millis());
+    server.send(200, "text/html; charset=utf-8", localPage("Alimentação solicitada! O comedouro está liberando " + String(quantity) + " porção(ões)."));
+    feedFish("local-demo", quantity, commandId);
+  });
+
+  server.onNotFound([]() {
+    server.sendHeader("Location", "/");
+    server.send(303);
+  });
+
+server.on("/schedule", HTTP_POST, []() {
+
+  // Verifica se o ESP32 está conectado à internet.
+  if (WiFi.status() != WL_CONNECTED) {
+    server.send(
+      200,
+      "text/html; charset=UTF-8",
+      localPage("Não foi possível salvar: conecte o ESP32 à internet primeiro.")
     );
-
-    delay(3000);
-
-    ESP.restart();
-
     return;
   }
 
-  // ==========================================================
-  // CONECTADO
-  // ==========================================================
+  String horario = server.arg("time");
+  int quantidade = server.arg("quantity").toInt();
 
-  Serial.println();
+  // Validação dos dados recebidos.
+  if (horario.length() != 5 ||
+      horario.charAt(2) != ':' ||
+      quantidade < 1 ||
+      quantidade > 10) {
 
-  Serial.println("==============================");
-  Serial.println("      WI-FI CONECTADO!");
-  Serial.println("==============================");
+    server.send(
+      200,
+      "text/html; charset=UTF-8",
+      localPage("Verifique o horário e a quantidade de porções.")
+    );
+    return;
+  }
 
-  Serial.print("IP: ");
-  Serial.println(
-    WiFi.localIP()
+  int hora = horario.substring(0, 2).toInt();
+  int minuto = horario.substring(3, 5).toInt();
+
+  if (hora < 0 || hora > 23 || minuto < 0 || minuto > 59) {
+    server.send(
+      200,
+      "text/html; charset=UTF-8",
+      localPage("Horário inválido.")
+    );
+    return;
+  }
+
+  // Gera um identificador para o novo agendamento.
+  String scheduleId = String(millis());
+
+  // Mantém o mesmo formato usado pelo site.
+  String caminho =
+    "/devices/" + String(FIREBASE_DEVICE_ID) +
+    "/schedules/" + scheduleId;
+
+  String dados =
+    "{\"hour\":" + String(hora) +
+    ",\"minute\":" + String(minuto) +
+    ",\"quantity\":" + String(quantidade) +
+    ",\"active\":true}";
+
+  Serial.println("[AGENDAMENTO LOCAL]");
+  Serial.println("Horário: " + horario);
+  Serial.println("Porções: " + String(quantidade));
+  Serial.println("Firebase: " + caminho);
+
+  firebasePut(caminho, dados);
+
+  server.send(
+    200,
+    "text/html; charset=UTF-8",
+    localPage("Agendamento enviado! Horário: " + horario +
+              " • " + String(quantidade) + " porção(ões).")
   );
+});
 
-  Serial.print("RSSI: ");
-  Serial.println(
-    WiFi.RSSI()
-  );
+
+  server.begin();
+  localServerStarted = true;
+  Serial.println("[Web] Página local disponível em http://192.168.4.1");
 }
 
 // ============================================================
@@ -1009,7 +1570,7 @@ bool syncTimeFromFirebaseDate() {
   http.end();
 
   if (code < 200 || code >= 300 || dateHeader.length() == 0) {
-    Serial.printf("[Hora] Data HTTPS indisponível. HTTP: %d\\n", code);
+    Serial.printf("[Hora] Data HTTPS indisponível. HTTP: %d\n", code);
     return false;
   }
 
@@ -1048,15 +1609,36 @@ bool syncTimeFromFirebaseDate() {
     return false;
   }
 
-  struct tm parsedTime = {};
-  parsedTime.tm_year = year - 1900;
-  parsedTime.tm_mon = month;
-  parsedTime.tm_mday = day;
-  parsedTime.tm_hour = hour;
-  parsedTime.tm_min = minute;
-  parsedTime.tm_sec = second;
+  // Converte a data UTC do cabeçalho HTTP para Unix time.
+  // Usa cálculo próprio compatível com o core Arduino-ESP32.
+  int adjustedYear = year;
+  unsigned adjustedMonth = (unsigned)(month + 1); // 1 a 12
+  adjustedYear -= (adjustedMonth <= 2);
 
-  time_t utc = timegm(&parsedTime);
+  const int era = (adjustedYear >= 0
+                     ? adjustedYear
+                     : adjustedYear - 399) / 400;
+  const unsigned yearOfEra =
+    (unsigned)(adjustedYear - era * 400);
+  const unsigned monthPrime =
+    (adjustedMonth > 2)
+      ? adjustedMonth - 3
+      : adjustedMonth + 9;
+  const unsigned dayOfYear =
+    (153 * monthPrime + 2) / 5 + (unsigned)day - 1;
+  const unsigned dayOfEra =
+    yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear;
+
+  const int64_t daysSinceEpoch =
+    (int64_t)era * 146097LL + (int64_t)dayOfEra - 719468LL;
+
+  const int64_t unixSeconds =
+    daysSinceEpoch * 86400LL +
+    (int64_t)hour * 3600LL +
+    (int64_t)minute * 60LL +
+    (int64_t)second;
+
+  time_t utc = (time_t)unixSeconds;
   if (utc < 100000) {
     Serial.println("[Hora] Data HTTPS resultou em timestamp inválido.");
     return false;
@@ -1192,12 +1774,17 @@ void setup() {
   // ==========================================================
 
   connectWiFi();
+  startLocalServer();
 
   // ==========================================================
-  // HORÁRIO
+  // HORÁRIO (necessário para agendamentos/Firebase)
   // ==========================================================
 
-  setupTime();
+  if (WiFi.status() == WL_CONNECTED) {
+    setupTime();
+  } else {
+    Serial.println("[Hora] Sem internet: agendamentos não estarão disponíveis no modo offline.");
+  }
 
   // ==========================================================
   // PRIMEIRO HEARTBEAT
@@ -1223,30 +1810,24 @@ void setup() {
 
 void loop() {
 
-  // ==========================================================
-  // VERIFICA WI-FI
-  // ==========================================================
+  // O servidor local continua funcionando mesmo sem internet.
+  if (localServerStarted) server.handleClient();
 
-  if (
-    WiFi.status() !=
-    WL_CONNECTED
-  ) {
+  unsigned long now = millis();
 
-    Serial.println(
-      "[Wi-Fi] Conexão perdida."
-    );
-
-    relayOff();
-
-    connectWiFi();
-
-    delay(1000);
-
-    return;
+  // Tenta recuperar a conexão externa sem derrubar o ponto de acesso.
+  if (WiFi.status() != WL_CONNECTED && now - lastWifiReconnect >= WIFI_RECONNECT_INTERVAL) {
+    lastWifiReconnect = now;
+    Serial.println("[Wi-Fi] Tentando reconectar à rede externa...");
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.begin();
   }
 
-  unsigned long now =
-    millis();
+  // Sem internet, mantém somente o controle local ativo.
+  if (WiFi.status() != WL_CONNECTED) {
+    delay(5);
+    return;
+  }
 
   // ==========================================================
   // HEARTBEAT
